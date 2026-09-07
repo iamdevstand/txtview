@@ -6,4 +6,4 @@ repository = "https://github.com/iamdevstand/txtview"
 authors = ["Devstand"]
 
 [dependencies]
-crossterm = "0.29"
+crossterm = { version = "0.29", default-features = false, features = ["events", "windows"] }
