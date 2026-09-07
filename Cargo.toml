@@ -1,0 +1,9 @@
+[package]
+name = "txtview"
+version = "0.1.0"
+edition = "2024"
+repository = "https://github.com/iamdevstand/txtview"
+authors = ["Devstand"]
+
+[dependencies]
+crossterm = "0.29"
