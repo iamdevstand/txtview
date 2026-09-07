@@ -1,47 +1,21 @@
-use std::io::{self, Write};
+use std::io;
 
 use crossterm::{
     cursor::MoveTo,
     queue,
-    terminal::{self, Clear, ClearType, ScrollDown, ScrollUp},
+    terminal::{self, Clear, ClearType},
 };
 
 use super::TxtView;
 
 impl TxtView {
-    pub(super) fn draw(&mut self, stdout: &mut io::Stdout) -> io::Result<()> {
-        let rows = terminal::size()?.1;
-        self.refresh_bounds();
-
-        let visible = self.visible_rows() as usize;
-        let end = (self.offset + visible).min(self.display.len());
-
-        for (i, text) in self.display[self.offset..end].iter().enumerate() {
-            queue!(stdout, MoveTo(0, i as u16), Clear(ClearType::CurrentLine))?;
-            write!(stdout, "{}", text)?;
-        }
-
-        self.render_status_bar(stdout, rows)?;
-
-        stdout.flush()?;
-        Ok(())
-    }
-
-    pub(super) fn draw_scroll(&mut self, stdout: &mut io::Stdout, delta: isize) -> io::Result<()> {
+    pub(super) fn draw(&mut self, stdout: &mut impl io::Write) -> io::Result<()> {
         let rows = terminal::size()?.1;
         self.refresh_bounds();
 
         let visible = self.visible_rows() as usize;
 
-        if delta > 0 {
-            let n = delta as usize;
-            queue!(stdout, ScrollUp(delta as u16))?;
-            self.render_rows(stdout, visible.saturating_sub(n)..visible)?;
-        } else {
-            let n = (-delta) as usize;
-            queue!(stdout, ScrollDown(n as u16))?;
-            self.render_rows(stdout, 0..n.min(visible))?;
-        }
+        self.render_rows(stdout, 0..visible)?;
 
         self.render_status_bar(stdout, rows)?;
 
@@ -51,7 +25,7 @@ impl TxtView {
 
     fn render_rows(
         &mut self,
-        stdout: &mut io::Stdout,
+        stdout: &mut impl io::Write,
         range: std::ops::Range<usize>,
     ) -> io::Result<()> {
         for i in range {
@@ -66,7 +40,7 @@ impl TxtView {
         Ok(())
     }
 
-    fn render_status_bar(&mut self, stdout: &mut io::Stdout, rows: u16) -> io::Result<()> {
+    fn render_status_bar(&mut self, stdout: &mut impl io::Write, rows: u16) -> io::Result<()> {
         if !self.config.status_bar_visible {
             return Ok(());
         }

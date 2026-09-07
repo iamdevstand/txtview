@@ -1,4 +1,5 @@
 use std::io;
+use std::time::{Duration, Instant};
 
 use crossterm::{
     cursor::{Hide, Show},
@@ -11,10 +12,12 @@ use crossterm::{
 
 use super::TxtView;
 
+const PAGE_JUMP_COOLDOWN: Duration = Duration::from_millis(250);
+
 impl TxtView {
     pub fn run(&mut self) -> io::Result<()> {
         terminal::enable_raw_mode()?;
-        let mut stdout = io::stdout();
+        let mut stdout = io::BufWriter::with_capacity(256 * 1024, io::stdout());
 
         execute!(stdout, EnterAlternateScreen, Hide, EnableMouseCapture)?;
 
@@ -26,8 +29,10 @@ impl TxtView {
         result
     }
 
-    fn event_loop(&mut self, stdout: &mut io::Stdout) -> io::Result<()> {
+    fn event_loop(&mut self, stdout: &mut impl io::Write) -> io::Result<()> {
         self.draw(stdout)?;
+
+        let mut last_page_jump = Instant::now() - PAGE_JUMP_COOLDOWN;
 
         loop {
             match event::read()? {
@@ -46,12 +51,18 @@ impl TxtView {
                         self.apply_scroll(stdout, delta)?;
                     }
                     (KeyCode::PageDown, _) => {
-                        let delta = self.scroll_down(self.visible_rows() as usize);
-                        self.apply_scroll(stdout, delta)?;
+                        if last_page_jump.elapsed() >= PAGE_JUMP_COOLDOWN {
+                            let delta = self.scroll_down(self.visible_rows() as usize);
+                            self.apply_scroll(stdout, delta)?;
+                            last_page_jump = Instant::now();
+                        }
                     }
                     (KeyCode::PageUp, _) => {
-                        let delta = self.scroll_up(self.visible_rows() as usize);
-                        self.apply_scroll(stdout, delta)?;
+                        if last_page_jump.elapsed() >= PAGE_JUMP_COOLDOWN {
+                            let delta = self.scroll_up(self.visible_rows() as usize);
+                            self.apply_scroll(stdout, delta)?;
+                            last_page_jump = Instant::now();
+                        }
                     }
                     (KeyCode::Home, _) | (KeyCode::Char('g'), KeyModifiers::NONE) => {
                         self.jump_to_start();
@@ -84,14 +95,10 @@ impl TxtView {
         Ok(())
     }
 
-    fn apply_scroll(&mut self, stdout: &mut io::Stdout, delta: isize) -> io::Result<()> {
-        if delta == 0 {
-            return Ok(());
+    fn apply_scroll(&mut self, stdout: &mut impl io::Write, delta: isize) -> io::Result<()> {
+        if delta != 0 {
+            self.draw(stdout)?;
         }
-        if delta.unsigned_abs() > self.visible_rows() as usize {
-            self.draw(stdout)
-        } else {
-            self.draw_scroll(stdout, delta)
-        }
+        Ok(())
     }
 }
