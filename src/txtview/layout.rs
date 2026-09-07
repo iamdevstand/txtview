@@ -64,20 +64,14 @@ impl TxtView {
         let mut rows_per_line = Vec::with_capacity(self.lines.len());
 
         for (i, line) in self.lines.iter().enumerate() {
-            let prefix = if self.config.show_line_numbers {
-                format!("{:>width$} │ ", i + 1, width = prefix_width - 3)
-            } else {
-                String::new()
-            };
-
             let chars: Vec<char> = line.chars().collect();
             let mut rows = 0usize;
             if chars.is_empty() {
-                display.push(prefix);
+                display.push(self.line_prefix(i, 0));
                 rows = 1;
             } else {
-                for chunk in chars.chunks(avail) {
-                    let mut row = prefix.clone();
+                for (ci, chunk) in chars.chunks(avail).enumerate() {
+                    let mut row = self.line_prefix(i, ci);
                     row.extend(chunk.iter());
                     display.push(row);
                     rows += 1;
@@ -88,6 +82,19 @@ impl TxtView {
 
         self.display = display;
         self.rows_per_line = rows_per_line;
+    }
+
+    fn line_prefix(&self, line_index: usize, chunk_index: usize) -> String {
+        if !self.config.show_line_numbers {
+            return String::new();
+        }
+        let width = self.lines.len().to_string().len();
+        let label = if chunk_index == 0 {
+            (line_index + 1).to_string()
+        } else {
+            "↳".to_string()
+        };
+        format!("{:>width$} │ ", label, width = width)
     }
 
     pub(super) fn refresh_bounds(&mut self) {
