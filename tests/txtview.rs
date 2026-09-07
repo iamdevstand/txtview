@@ -52,7 +52,7 @@ fn scroll_down_clamps_at_end() {
     let mut v = viewer(&text(25), 10);
     v.scroll_down(100);
     assert_eq!(v.offset(), v.max_offset());
-    assert_eq!(v.max_offset(), 17);
+    assert_eq!(v.max_offset(), 18);
 }
 
 #[test]
@@ -76,7 +76,7 @@ fn jump_to_end_stops_at_max_offset() {
     let mut v = viewer(&text(25), 10);
     v.jump_to_end();
     assert_eq!(v.offset(), v.max_offset());
-    assert_eq!(v.offset(), 17);
+    assert_eq!(v.offset(), 18);
 }
 
 #[test]
@@ -116,7 +116,8 @@ fn long_lines_wrap_into_multiple_rows() {
         .collect::<Vec<_>>()
         .join("\n");
     let config = TxtViewConfig {
-        viewport_height: Some(10),
+        status_bar_visible: false,
+        viewport_height: Some(8),
         viewport_width: Some(10),
         ..TxtViewConfig::default()
     };
@@ -134,7 +135,8 @@ fn long_lines_wrap_into_multiple_rows() {
 #[test]
 fn empty_lines_still_occupy_a_row() {
     let config = TxtViewConfig {
-        viewport_height: Some(3),
+        status_bar_visible: false,
+        viewport_height: Some(1),
         viewport_width: Some(10),
         ..TxtViewConfig::default()
     };
@@ -149,9 +151,9 @@ fn empty_lines_still_occupy_a_row() {
 fn line_number_prefix_counts_in_width() {
     let config = TxtViewConfig {
         show_line_numbers: true,
-        viewport_height: Some(5),
+        status_bar_visible: false,
+        viewport_height: Some(3),
         viewport_width: Some(10),
-        ..TxtViewConfig::default()
     };
     let input = "12345678901234567890\n12345678901234567890";
     let mut v = TxtView::new(input).with_config(config);

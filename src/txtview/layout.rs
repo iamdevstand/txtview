@@ -3,22 +3,51 @@ use crossterm::terminal;
 use super::TxtView;
 
 impl TxtView {
+    fn term_size(&self) -> (u16, u16) {
+        terminal::size().unwrap_or((80, 24))
+    }
+
+    pub(super) fn status_wrap_cols(&self) -> usize {
+        match self.config.viewport_width {
+            Some(w) => w as usize,
+            None => self.term_size().0 as usize,
+        }
+        .max(1)
+    }
+
+    pub(super) fn status_text(&self) -> String {
+        format!(
+            "q: quit | ↑/↓, j/k: scroll | PgUp/PgDn: page | g/h: start/end | Mouse: scroll  [{}/{}]",
+            self.current_line_index() + 1,
+            self.lines.len()
+        )
+    }
+
+    fn status_height(&self) -> usize {
+        if !self.config.status_bar_visible {
+            return 0;
+        }
+        let lines = self
+            .status_text()
+            .chars()
+            .count()
+            .div_ceil(self.status_wrap_cols())
+            .max(1);
+        1 + lines
+    }
+
     pub(super) fn visible_rows(&self) -> u16 {
         let h = match self.config.viewport_height {
             Some(h) => h,
-            None => terminal::size().unwrap_or((80, 24)).1,
+            None => self.term_size().1,
         };
-        if self.config.status_bar_visible {
-            h.saturating_sub(2)
-        } else {
-            h
-        }
+        h.saturating_sub(self.status_height() as u16)
     }
 
     fn layout_cols(&self) -> usize {
         match self.config.viewport_width {
             Some(w) => w as usize,
-            None => terminal::size().unwrap_or((80, 24)).0 as usize,
+            None => self.term_size().0 as usize,
         }
     }
 

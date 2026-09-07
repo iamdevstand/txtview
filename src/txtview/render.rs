@@ -10,7 +10,7 @@ use super::TxtView;
 
 impl TxtView {
     pub(super) fn draw(&mut self, stdout: &mut io::Stdout) -> io::Result<()> {
-        let (cols, rows) = terminal::size()?;
+        let rows = terminal::size()?.1;
         self.refresh_bounds();
 
         let visible = self.visible_rows() as usize;
@@ -21,14 +21,14 @@ impl TxtView {
             write!(stdout, "{}", text)?;
         }
 
-        self.render_status_bar(stdout, cols, rows)?;
+        self.render_status_bar(stdout, rows)?;
 
         stdout.flush()?;
         Ok(())
     }
 
     pub(super) fn draw_scroll(&mut self, stdout: &mut io::Stdout, delta: isize) -> io::Result<()> {
-        let (cols, rows) = terminal::size()?;
+        let rows = terminal::size()?.1;
         self.refresh_bounds();
 
         let visible = self.visible_rows() as usize;
@@ -43,7 +43,7 @@ impl TxtView {
             self.render_rows(stdout, 0..n.min(visible))?;
         }
 
-        self.render_status_bar(stdout, cols, rows)?;
+        self.render_status_bar(stdout, rows)?;
 
         stdout.flush()?;
         Ok(())
@@ -66,36 +66,47 @@ impl TxtView {
         Ok(())
     }
 
-    fn render_status_bar(
-        &mut self,
-        stdout: &mut io::Stdout,
-        cols: u16,
-        rows: u16,
-    ) -> io::Result<()> {
+    fn render_status_bar(&mut self, stdout: &mut io::Stdout, rows: u16) -> io::Result<()> {
         if !self.config.status_bar_visible {
             return Ok(());
         }
 
-        let status = format!(
-            "q: quit | ↑/↓, j/k: scroll | PgUp/PgDn: page | g/h: start/end | Mouse: scroll  [{}/{}]",
-            self.current_line_index() + 1,
-            self.lines.len()
-        );
+        let cols = self.status_wrap_cols();
+        let lines = wrap_lines(&self.status_text(), cols);
+        let reserve = 1 + lines.len();
+        if (rows as usize) < reserve {
+            return Ok(());
+        }
+        let base = rows as usize - reserve;
 
         queue!(
             stdout,
-            MoveTo(0, rows.saturating_sub(2)),
+            MoveTo(0, base as u16),
             Clear(ClearType::CurrentLine)
         )?;
-        write!(stdout, "{}", "─".repeat(cols as usize))?;
+        write!(stdout, "{}", "─".repeat(cols))?;
 
-        queue!(
-            stdout,
-            MoveTo(0, rows.saturating_sub(1)),
-            Clear(ClearType::CurrentLine)
-        )?;
-        write!(stdout, "{}", status)?;
+        for (i, line) in lines.iter().enumerate() {
+            queue!(
+                stdout,
+                MoveTo(0, (base + 1 + i) as u16),
+                Clear(ClearType::CurrentLine)
+            )?;
+            write!(stdout, "{}", line)?;
+        }
 
         Ok(())
     }
+}
+
+fn wrap_lines(s: &str, width: usize) -> Vec<String> {
+    let width = width.max(1);
+    let chars: Vec<char> = s.chars().collect();
+    if chars.is_empty() {
+        return vec![String::new()];
+    }
+    chars
+        .chunks(width)
+        .map(|chunk| chunk.iter().collect())
+        .collect()
 }
