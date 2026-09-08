@@ -1,0 +1,14 @@
+[
+  {
+    "label": "Debug - Example sample_text",
+    "adapter": "CodeLLDB",
+    "request": "launch",
+    "build": {
+      "command": "cargo",
+      "args": ["build", "--example" ,"sample_text"]
+    },
+    "program": "$ZED_WORKTREE_ROOT/target/debug/examples/sample_text",
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "sourceLanguages": ["rust"],
+  }
+]

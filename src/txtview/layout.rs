@@ -16,10 +16,14 @@ impl TxtView {
     }
 
     pub(super) fn status_text(&self) -> String {
+        let percentage = if self.max_offset == 0 {
+            0
+        } else {
+            (self.offset * 100) / self.max_offset
+        };
         format!(
-            "q: quit | ↑/↓, j/k, Mouse: scroll | PgUp/PgDn: page | Home/End, g/G: start/end  [{}/{}]",
-            self.current_line_index() + 1,
-            self.lines.len()
+            "q: quit | ↑/↓, j/k, Mouse: scroll | PgUp/PgDn: page | Home/End, g/G: start/end  [{}%]",
+            percentage
         )
     }
 
