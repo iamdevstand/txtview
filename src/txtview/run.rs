@@ -65,22 +65,22 @@ impl TxtView {
                         }
                     }
                     (KeyCode::Home, _) | (KeyCode::Char('g'), KeyModifiers::NONE) => {
-                        self.jump_to_start();
-                        self.draw(stdout)?;
+                        let delta = self.jump_to_start();
+                        self.apply_scroll(stdout, delta)?;
                     }
-                    (KeyCode::End, _) | (KeyCode::Char('h'), KeyModifiers::NONE) => {
-                        self.jump_to_end();
-                        self.draw(stdout)?;
+                    (KeyCode::End, _) | (KeyCode::Char('G'), _) => {
+                        let delta = self.jump_to_end();
+                        self.apply_scroll(stdout, delta)?;
                     }
                     _ => {}
                 },
                 Event::Mouse(mouse) => match mouse.kind {
                     MouseEventKind::ScrollUp => {
-                        let delta = self.scroll_up(3);
+                        let delta = self.scroll_up(1);
                         self.apply_scroll(stdout, delta)?;
                     }
                     MouseEventKind::ScrollDown => {
-                        let delta = self.scroll_down(3);
+                        let delta = self.scroll_down(1);
                         self.apply_scroll(stdout, delta)?;
                     }
                     _ => {}

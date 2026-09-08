@@ -15,13 +15,18 @@ impl TxtView {
         self.offset as isize - old
     }
 
-    pub(crate) fn jump_to_start(&mut self) {
+    pub(crate) fn jump_to_start(&mut self) -> isize {
+        self.refresh_bounds();
+        let old = self.offset as isize;
         self.offset = 0;
+        self.offset as isize - old
     }
 
-    pub(crate) fn jump_to_end(&mut self) {
+    pub(crate) fn jump_to_end(&mut self) -> isize {
         self.refresh_bounds();
+        let old = self.offset as isize;
         self.offset = self.max_offset;
+        self.offset as isize - old
     }
 
     pub(super) fn current_line_index(&self) -> usize {

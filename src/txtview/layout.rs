@@ -17,7 +17,7 @@ impl TxtView {
 
     pub(super) fn status_text(&self) -> String {
         format!(
-            "q: quit | ↑/↓, j/k: scroll | PgUp/PgDn: page | g/h: start/end | Mouse: scroll  [{}/{}]",
+            "q: quit | ↑/↓, j/k, Mouse: scroll | PgUp/PgDn: page | Home/End, g/G: start/end  [{}/{}]",
             self.current_line_index() + 1,
             self.lines.len()
         )
