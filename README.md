@@ -1,6 +1,6 @@
 # TxtView
 
-**TxtView** is a lightweight text viewer for the terminal, written in Rust and built on [crossterm](https://github.com/crossterm-rs/crossterm). Drop it into your own CLI tools whenever you need a line-based viewer with scrolling, wrapping, line numbers, and an optional progress indicator.
+**TxtView** is a lightweight text viewer for the terminal, written in Rust and built on [crossterm](https://github.com/crossterm-rs/crossterm). Drop it into your own CLI tools whenever you need a line-based viewer with scrolling, wrapping, line numbers, and an optional interactive scrollbar.
 
 ## Features
 
@@ -10,7 +10,7 @@
 - Automatic line wrapping to the viewport width, with continuation markers on wrapped rows
 - Optional line numbers
 - Optional help bar with keybinding hints
-- Optional vertical scrollbar progress indicator
+- Optional interactive vertical scrollbar
 - Configurable viewport width and height, or just use the terminal size automatically
 
 ## Library Usage
@@ -80,10 +80,10 @@ TxtView is configured through `TxtViewConfig`, either with `..TxtViewConfig::def
 ```rust
 let config = TxtViewConfig::default()
     .with_show_line_numbers(true)
-    .with_show_progress(false);
+    .with_show_scrollbar(false);
 ```
 
-It can toggle line numbers, the help bar, and the progress indicator, as well as fix the viewport width and height (it falls back to the terminal size when unset).
+It can toggle line numbers, the help bar, and the scrollbar, as well as fix the viewport width and height (it falls back to the terminal size when unset).
 
 For the full list of options and defaults, see the `TxtViewConfig` rustdoc.
 

@@ -42,21 +42,16 @@ impl TxtView {
     }
 
     fn render_scrollbar(&mut self, stdout: &mut impl io::Write, visible: usize) -> io::Result<()> {
-        if !self.config.show_progress || self.max_offset == 0 || visible == 0 {
+        let Some(g) = self.scroll_geometry(visible) else {
             return Ok(());
-        }
-        let cols = self.help_wrap_cols();
-        let gutter = cols.saturating_sub(1) as u16;
-        let total = self.display.len().max(1);
-        let thumb = (visible * visible / total).max(1).min(visible);
-        let top = (self.offset * (visible - thumb) / self.max_offset).min(visible - thumb);
-        for i in 0..visible {
-            let ch = if i >= top && i < top + thumb {
-                '█'
+        };
+        for i in 0..g.visible {
+            let ch = if i >= g.top && i < g.top + g.size {
+                if self.dragging { '▓' } else { '█' }
             } else {
                 '░'
             };
-            queue!(stdout, MoveTo(gutter, i as u16))?;
+            queue!(stdout, MoveTo(g.column, i as u16))?;
             write!(stdout, "{}", ch)?;
         }
         Ok(())
@@ -145,5 +140,46 @@ mod tests {
         v.render_scrollbar(&mut out, v.visible_rows() as usize)
             .unwrap();
         assert!(out.is_empty(), "expected no output: {out:?}");
+    }
+
+    #[test]
+    fn offset_from_thumb_top_is_monotonic_and_bounded() {
+        let v = viewer(100);
+        let visible = v.visible_rows() as usize;
+        let g = v.scroll_geometry(visible).expect("scrollbar present");
+        let travel = (g.visible - g.size) as i64;
+
+        assert_eq!(v.offset_from_thumb_top(-5, &g), 0);
+        assert_eq!(v.offset_from_thumb_top(0, &g), 0);
+        assert_eq!(v.offset_from_thumb_top(travel, &g), v.max_offset);
+
+        let mut prev = 0;
+        for top in 0..=travel {
+            let off = v.offset_from_thumb_top(top, &g);
+            assert!(off >= prev, "not monotonic at top={top}");
+            assert!(off <= v.max_offset, "exceeds max_offset at top={top}");
+            prev = off;
+        }
+    }
+
+    #[test]
+    fn dragging_keeps_thumb_on_mouse() {
+        let mut v = viewer(100);
+        let visible = v.visible_rows() as usize;
+        let g = v.scroll_geometry(visible).unwrap();
+
+        for mouse_y in 0..visible as u16 {
+            let off = v.offset_from_thumb_top(mouse_y as i64, &g);
+            v.offset = off;
+            let moved = v.scroll_geometry(visible).unwrap();
+            let desired = (mouse_y as i64).clamp(0, (g.visible - g.size) as i64) as usize;
+            assert!(
+                moved.top.abs_diff(desired) <= 1,
+                "thumb at {} dragged to {} for y={}",
+                moved.top,
+                desired,
+                mouse_y
+            );
+        }
     }
 }

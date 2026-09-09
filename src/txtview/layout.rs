@@ -2,6 +2,13 @@ use crossterm::terminal;
 
 use super::TxtView;
 
+pub(super) struct ScrollGeometry {
+    pub column: u16,
+    pub top: usize,
+    pub size: usize,
+    pub visible: usize,
+}
+
 impl TxtView {
     fn term_size(&self) -> (u16, u16) {
         terminal::size().unwrap_or((80, 24))
@@ -104,5 +111,28 @@ impl TxtView {
         if self.offset > self.max_offset {
             self.offset = self.max_offset;
         }
+    }
+
+    pub(super) fn scroll_geometry(&self, visible: usize) -> Option<ScrollGeometry> {
+        if !self.config.show_scrollbar || self.max_offset == 0 || visible == 0 {
+            return None;
+        }
+        let total = self.display.len().max(1);
+        let thumb = (visible * visible / total).max(1).min(visible);
+        let top = (self.offset * (visible - thumb) / self.max_offset).min(visible - thumb);
+        Some(ScrollGeometry {
+            column: self.help_wrap_cols().saturating_sub(1) as u16,
+            top,
+            size: thumb,
+            visible,
+        })
+    }
+
+    /// Map a thumb-top row (0..visible) to a scroll offset using the same
+    /// proportion that [`TxtView::scroll_geometry`] uses in reverse.
+    pub(super) fn offset_from_thumb_top(&self, top: i64, g: &ScrollGeometry) -> usize {
+        let travel = (g.visible as i64 - g.size as i64).max(1);
+        let clamped = top.clamp(0, travel);
+        (clamped * self.max_offset as i64 / travel) as usize
     }
 }

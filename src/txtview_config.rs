@@ -19,7 +19,7 @@
 ///
 /// let config = TxtViewConfig::default()
 ///     .with_show_line_numbers(true)
-///     .with_show_progress(false);
+///     .with_show_scrollbar(false);
 /// ```
 /// colors and styling pass through unchanged. Build styled lines with crossterm’s style module and feed them straight into TxtV
 /// New options arrive in minor releases (`0.x.0`) and always default to the
@@ -31,9 +31,9 @@ pub struct TxtViewConfig {
     pub show_line_numbers: bool,
     /// Show the keybinding help bar at the bottom of the viewport.
     pub show_help_bar: bool,
-    /// Show a vertical scrollbar on the right edge indicating the current
-    /// reading position.
-    pub show_progress: bool,
+    /// Show an interactive vertical scrollbar on the right edge. It can be
+    /// clicked to jump to a position or dragged to scroll.
+    pub show_scrollbar: bool,
     /// Fixed viewport width in columns. `None` uses the terminal width.
     pub viewport_width: Option<u16>,
     /// Fixed viewport height in rows. `None` uses the terminal height.
@@ -45,7 +45,7 @@ impl Default for TxtViewConfig {
         TxtViewConfig {
             show_line_numbers: false,
             show_help_bar: true,
-            show_progress: true,
+            show_scrollbar: true,
             viewport_width: None,
             viewport_height: None,
         }
@@ -65,9 +65,9 @@ impl TxtViewConfig {
         self
     }
 
-    /// Set whether the vertical scrollbar is shown.
-    pub fn with_show_progress(mut self, show: bool) -> Self {
-        self.show_progress = show;
+    /// Set whether the interactive scrollbar is shown.
+    pub fn with_show_scrollbar(mut self, show: bool) -> Self {
+        self.show_scrollbar = show;
         self
     }
 

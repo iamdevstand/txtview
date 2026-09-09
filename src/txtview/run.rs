@@ -5,7 +5,8 @@ use std::time::{Duration, Instant};
 use crossterm::{
     cursor::{Hide, Show},
     event::{
-        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers, MouseEventKind,
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyModifiers, MouseButton,
+        MouseEventKind,
     },
     execute,
     terminal::{self, EnterAlternateScreen, LeaveAlternateScreen},
@@ -37,6 +38,7 @@ impl TxtView {
     /// | `PgUp`/`PgDn`      | Scroll one page        |
     /// | `Home`/`g`, `End`/`G` | Jump to start / end |
     /// | Mouse wheel       | Scroll one line per tick |
+    /// | Scrollbar track/thumb | Click to jump to position, drag to scroll |
     pub fn run(&mut self) -> io::Result<()> {
         if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
             return Err(io::Error::new(
@@ -110,6 +112,39 @@ impl TxtView {
                     MouseEventKind::ScrollDown => {
                         let delta = self.scroll_down(1);
                         self.apply_scroll(stdout, delta)?;
+                    }
+                    MouseEventKind::Down(MouseButton::Left) => {
+                        let visible = self.visible_rows() as usize;
+                        if let Some(g) = self.scroll_geometry(visible)
+                            && mouse.column == g.column
+                        {
+                            let y = mouse.row as usize;
+                            if y >= g.top && y < g.top + g.size {
+                                self.dragging = true;
+                                self.drag_grab_offset = y - g.top;
+                                self.draw(stdout)?;
+                            } else {
+                                let size = g.size.max(1);
+                                let center = y.saturating_sub(size / 2);
+                                let target = self.offset_from_thumb_top(center as i64, &g);
+                                let delta = self.scroll_to(target);
+                                self.apply_scroll(stdout, delta)?;
+                                self.dragging = true;
+                                self.drag_grab_offset = size.div_ceil(2).min(size - 1);
+                            }
+                        }
+                    }
+                    MouseEventKind::Drag(MouseButton::Left) if self.dragging => {
+                        if let Some(g) = self.scroll_geometry(self.visible_rows() as usize) {
+                            let top = mouse.row as i64 - self.drag_grab_offset as i64;
+                            let target = self.offset_from_thumb_top(top, &g);
+                            let delta = self.scroll_to(target);
+                            self.apply_scroll(stdout, delta)?;
+                        }
+                    }
+                    MouseEventKind::Up(_) if self.dragging => {
+                        self.dragging = false;
+                        self.draw(stdout)?;
                     }
                     _ => {}
                 },

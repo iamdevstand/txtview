@@ -8,6 +8,13 @@ impl TxtView {
         self.offset as isize - old
     }
 
+    pub(crate) fn scroll_to(&mut self, offset: usize) -> isize {
+        self.refresh_bounds();
+        let old = self.offset as isize;
+        self.offset = offset.min(self.max_offset);
+        self.offset as isize - old
+    }
+
     pub(crate) fn scroll_up(&mut self, amount: usize) -> isize {
         self.refresh_bounds();
         let old = self.offset as isize;
@@ -56,6 +63,28 @@ mod tests {
         let mut v = viewer(&text(25), 10);
         v.scroll_down(5);
         assert_eq!(v.offset, 5);
+    }
+
+    #[test]
+    fn scroll_to_clamps_at_end() {
+        let mut v = viewer(&text(25), 10);
+        v.scroll_to(1000);
+        assert_eq!(v.offset, v.max_offset);
+    }
+
+    #[test]
+    fn scroll_to_saturates_at_zero() {
+        let mut v = viewer(&text(25), 10);
+        v.scroll_down(5);
+        v.scroll_to(0);
+        assert_eq!(v.offset, 0);
+    }
+
+    #[test]
+    fn scroll_to_moves_to_absolute_position() {
+        let mut v = viewer(&text(25), 10);
+        v.scroll_to(7);
+        assert_eq!(v.offset, 7);
     }
 
     #[test]
@@ -163,7 +192,7 @@ mod tests {
         let config = TxtViewConfig {
             show_line_numbers: true,
             show_help_bar: false,
-            show_progress: false,
+            show_scrollbar: false,
             viewport_height: Some(3),
             viewport_width: Some(10),
         };

@@ -26,7 +26,7 @@
 //! # Configuration
 //!
 //! [`TxtViewConfig`] controls the display: line numbers, the help bar, the
-//! progress scrollbar, and a fixed viewport size. Configure it with a struct
+//! interactive scrollbar, and a fixed viewport size. Configure it with a struct
 //! literal plus `..TxtViewConfig::default()`, or chain the `with_*` setters.
 //! See its documentation for examples.
 

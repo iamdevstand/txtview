@@ -2,7 +2,7 @@
 name = "txtview"
 version = "0.1.0"
 edition = "2024"
-description = "A lightweight terminal text viewer with scrolling, wrapping, line numbers, and an optional progress indicator"
+description = "A lightweight terminal text viewer with scrolling, wrapping, line numbers, and an optional interactive scrollbar"
 license = "MIT"
 repository = "https://github.com/iamdevstand/txtview"
 authors = ["Devstand"]

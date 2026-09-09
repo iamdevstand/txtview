@@ -27,6 +27,8 @@ pub struct TxtView {
     offset: usize,
     max_offset: usize,
     config: TxtViewConfig,
+    dragging: bool,
+    drag_grab_offset: usize,
 }
 
 impl TxtView {
@@ -50,6 +52,8 @@ impl TxtView {
             offset: 0,
             max_offset: 0,
             config: TxtViewConfig::default(),
+            dragging: false,
+            drag_grab_offset: 0,
         };
         view.refresh_bounds();
         view

@@ -50,7 +50,7 @@ fn main() {
         "Configuration".bold().to_string(),
         "  Everything is set through TxtViewConfig:".to_string(),
         setting("show_line_numbers", "toggles the line number column"),
-        setting("show_progress", "toggles the scrollbar"),
+        setting("show_scrollbar", "toggles the interactive scrollbar"),
         setting("show_help_bar", "toggles this help section"),
         "".to_string(),
     ];
