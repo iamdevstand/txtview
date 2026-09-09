@@ -1,4 +1,5 @@
 use std::io;
+use std::io::IsTerminal;
 use std::time::{Duration, Instant};
 
 use crossterm::{
@@ -16,17 +17,23 @@ const PAGE_JUMP_COOLDOWN: Duration = Duration::from_millis(250);
 
 impl TxtView {
     pub fn run(&mut self) -> io::Result<()> {
+        if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotConnected,
+                "txtview requires an interactive terminal: stdin and stdout must be a terminal",
+            ));
+        }
+
         terminal::enable_raw_mode()?;
         let mut stdout = io::BufWriter::with_capacity(256 * 1024, io::stdout());
 
-        execute!(stdout, EnterAlternateScreen, Hide, EnableMouseCapture)?;
+        let result = execute!(stdout, EnterAlternateScreen, Hide, EnableMouseCapture)
+            .and_then(|()| self.event_loop(&mut stdout));
 
-        let result = self.event_loop(&mut stdout);
+        let cleanup = execute!(stdout, DisableMouseCapture, LeaveAlternateScreen, Show)
+            .and_then(|()| terminal::disable_raw_mode());
 
-        execute!(stdout, DisableMouseCapture, LeaveAlternateScreen, Show)?;
-        terminal::disable_raw_mode()?;
-
-        result
+        result.and(cleanup)
     }
 
     fn event_loop(&mut self, stdout: &mut impl io::Write) -> io::Result<()> {
