@@ -1,5 +1,8 @@
 # TxtView
 
+[![crates.io](https://img.shields.io/crates/v/txtview.svg)](https://crates.io/crates/txtview)
+[![docs.rs](https://img.shields.io/docsrs/txtview)](https://docs.rs/txtview)
+
 **TxtView** is a lightweight text viewer for the terminal, written in Rust and built on [crossterm](https://github.com/crossterm-rs/crossterm). Drop it into your own CLI tools whenever you need a line-based viewer with scrolling, wrapping, line numbers, and an optional interactive scrollbar.
 
 ## Features
