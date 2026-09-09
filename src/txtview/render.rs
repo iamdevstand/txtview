@@ -129,7 +129,7 @@ mod tests {
     #[test]
     fn scrollbar_emits_thumb_blocks() {
         let mut v = viewer(25);
-        assert!(v.max_offset() > 0);
+        assert!(v.max_offset > 0);
         let mut out = Vec::new();
         v.render_scrollbar(&mut out, v.visible_rows() as usize)
             .unwrap();
@@ -140,7 +140,7 @@ mod tests {
     #[test]
     fn scrollbar_skipped_when_everything_fits() {
         let mut v = viewer(5);
-        assert_eq!(v.max_offset(), 0);
+        assert_eq!(v.max_offset, 0);
         let mut out = Vec::new();
         v.render_scrollbar(&mut out, v.visible_rows() as usize)
             .unwrap();

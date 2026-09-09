@@ -16,6 +16,27 @@ use super::TxtView;
 const PAGE_JUMP_COOLDOWN: Duration = Duration::from_millis(250);
 
 impl TxtView {
+    /// Show the viewer and block until the user quits.
+    ///
+    /// This takes over the terminal: it enters raw mode, switches to an
+    /// alternate screen, hides the cursor, and enables mouse capture. The
+    /// terminal is always restored before returning, including on errors.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`io::Error`] with [`io::ErrorKind::NotConnected`] when stdin
+    /// or stdout is not a terminal (for example when output is piped), and
+    /// propagates I/O errors from the terminal itself or the event loop.
+    ///
+    /// # Keybindings
+    ///
+    /// | Key               | Action                 |
+    /// | ----------------- | ---------------------- |
+    /// | `q`, `Esc`, `Ctrl+C` | Quit                |
+    /// | `↑`/`↓`, `j`/`k`  | Scroll one line        |
+    /// | `PgUp`/`PgDn`      | Scroll one page        |
+    /// | `Home`/`g`, `End`/`G` | Jump to start / end |
+    /// | Mouse wheel       | Scroll one line per tick |
     pub fn run(&mut self) -> io::Result<()> {
         if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
             return Err(io::Error::new(

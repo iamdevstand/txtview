@@ -75,7 +75,15 @@ let text = "\x1b[1;32mrunning\x1b[0m";
 
 ## Configuration
 
-TxtView is configured through `TxtViewConfig` using `..TxtViewConfig::default()` to fill the remaining fields. It can toggle line numbers, the help bar, and the progress indicator, as well as fix the viewport width and height (it falls back to the terminal size when unset).
+TxtView is configured through `TxtViewConfig`, either with `..TxtViewConfig::default()` to fill the remaining fields, or with chained `with_*` setters:
+
+```rust
+let config = TxtViewConfig::default()
+    .with_show_line_numbers(true)
+    .with_show_progress(false);
+```
+
+It can toggle line numbers, the help bar, and the progress indicator, as well as fix the viewport width and height (it falls back to the terminal size when unset).
 
 For the full list of options and defaults, see the `TxtViewConfig` rustdoc.
 
