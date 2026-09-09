@@ -21,7 +21,6 @@
 ///     .with_show_line_numbers(true)
 ///     .with_show_scrollbar(false);
 /// ```
-/// colors and styling pass through unchanged. Build styled lines with crossterm’s style module and feed them straight into TxtV
 /// New options arrive in minor releases (`0.x.0`) and always default to the
 /// previous behavior, so an existing viewer only changes look when you opt
 /// in. Patches (`0.0.x`) ship only bug fixes and purely additive methods.

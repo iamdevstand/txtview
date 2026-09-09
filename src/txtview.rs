@@ -23,7 +23,6 @@ use crate::TxtViewConfig;
 pub struct TxtView {
     lines: Vec<String>,
     display: Vec<String>,
-    rows_per_line: Vec<usize>,
     offset: usize,
     max_offset: usize,
     config: TxtViewConfig,
@@ -50,7 +49,6 @@ impl TxtView {
     pub fn new(input: impl AsRef<str>) -> Self {
         let lines: Vec<String> = input.as_ref().lines().map(String::from).collect();
         let mut view = TxtView {
-            rows_per_line: vec![1; lines.len()],
             lines,
             display: Vec::new(),
             offset: 0,

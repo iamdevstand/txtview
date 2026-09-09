@@ -84,7 +84,6 @@ impl TxtView {
         }
 
         self.display = display;
-        self.rows_per_line = rows_per_line;
     }
 
     fn line_prefix(&self, line_index: usize, chunk_index: usize) -> String {
