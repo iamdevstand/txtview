@@ -28,17 +28,6 @@ impl TxtView {
         self.offset = self.max_offset;
         self.offset as isize - old
     }
-
-    pub(super) fn current_line_index(&self) -> usize {
-        let mut acc = 0usize;
-        for (i, n) in self.rows_per_line.iter().enumerate() {
-            if self.offset < acc + n {
-                return i;
-            }
-            acc += n;
-        }
-        self.lines.len().saturating_sub(1)
-    }
 }
 
 #[cfg(test)]
@@ -74,7 +63,7 @@ mod tests {
         let mut v = viewer(&text(25), 10);
         v.scroll_down(100);
         assert_eq!(v.offset(), v.max_offset());
-        assert_eq!(v.max_offset(), 18);
+        assert_eq!(v.max_offset(), 17);
     }
 
     #[test]
@@ -98,7 +87,7 @@ mod tests {
         let mut v = viewer(&text(25), 10);
         v.jump_to_end();
         assert_eq!(v.offset(), v.max_offset());
-        assert_eq!(v.offset(), 18);
+        assert_eq!(v.offset(), 17);
     }
 
     #[test]
@@ -118,9 +107,9 @@ mod tests {
     }
 
     #[test]
-    fn hidden_status_bar_increases_viewport() {
+    fn hidden_help_bar_increases_viewport() {
         let config = TxtViewConfig {
-            status_bar_visible: false,
+            show_help_bar: false,
             viewport_height: Some(10),
             viewport_width: Some(80),
             ..TxtViewConfig::default()
@@ -138,7 +127,7 @@ mod tests {
             .collect::<Vec<_>>()
             .join("\n");
         let config = TxtViewConfig {
-            status_bar_visible: false,
+            show_help_bar: false,
             viewport_height: Some(8),
             viewport_width: Some(10),
             ..TxtViewConfig::default()
@@ -157,7 +146,7 @@ mod tests {
     #[test]
     fn empty_lines_still_occupy_a_row() {
         let config = TxtViewConfig {
-            status_bar_visible: false,
+            show_help_bar: false,
             viewport_height: Some(1),
             viewport_width: Some(10),
             ..TxtViewConfig::default()
@@ -173,7 +162,8 @@ mod tests {
     fn line_number_prefix_counts_in_width() {
         let config = TxtViewConfig {
             show_line_numbers: true,
-            status_bar_visible: false,
+            show_help_bar: false,
+            show_progress: false,
             viewport_height: Some(3),
             viewport_width: Some(10),
         };

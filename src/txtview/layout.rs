@@ -7,7 +7,7 @@ impl TxtView {
         terminal::size().unwrap_or((80, 24))
     }
 
-    pub(super) fn status_wrap_cols(&self) -> usize {
+    pub(super) fn help_wrap_cols(&self) -> usize {
         match self.config.viewport_width {
             Some(w) => w as usize,
             None => self.term_size().0 as usize,
@@ -15,27 +15,19 @@ impl TxtView {
         .max(1)
     }
 
-    pub(super) fn status_text(&self) -> String {
-        let percentage = if self.max_offset == 0 {
-            0
-        } else {
-            (self.offset * 100) / self.max_offset
-        };
-        format!(
-            "q: quit | ↑/↓, j/k, Mouse: scroll | PgUp/PgDn: page | Home/End, g/G: start/end  [{}%]",
-            percentage
-        )
+    pub(super) fn help_text(&self) -> String {
+        "q: quit | ↑/↓, j/k, Mouse: scroll | PgUp/PgDn: page | Home/End, g/G: start/end".to_string()
     }
 
-    fn status_height(&self) -> usize {
-        if !self.config.status_bar_visible {
+    fn help_height(&self) -> usize {
+        if !self.config.show_help_bar {
             return 0;
         }
         let lines = self
-            .status_text()
+            .help_text()
             .chars()
             .count()
-            .div_ceil(self.status_wrap_cols())
+            .div_ceil(self.help_wrap_cols())
             .max(1);
         1 + lines
     }
@@ -45,7 +37,7 @@ impl TxtView {
             Some(h) => h,
             None => self.term_size().1,
         };
-        h.saturating_sub(self.status_height() as u16)
+        h.saturating_sub(self.help_height() as u16)
     }
 
     fn layout_cols(&self) -> usize {
