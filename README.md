@@ -40,6 +40,39 @@ fn main() {
 }
 ```
 
+## Styled Text
+
+TxtView writes your content verbatim, so any ANSI-styled text renders as-is. Build your styled strings with [crossterm](https://github.com/crossterm-rs/crossterm) (the same library TxtView uses internally, so adding it costs no extra build time):
+
+```toml
+[dependencies]
+txtview = "0.1"
+crossterm = "0.29"
+```
+
+```rust
+use crossterm::style::Stylize;
+use txtview::{TxtView, TxtViewConfig};
+
+fn main() {
+    let text = format!(
+        "Status: {}\n  · {}\n  · {}",
+        "running".green().bold(),
+        "in a sandbox".yellow().italic(),
+        "high disk usage".red()
+    );
+
+    let mut viewer = TxtView::new(&text).with_config(TxtViewConfig::default());
+    viewer.run().unwrap();
+}
+```
+
+You are not tied to crossterm for styling, any library that emits ANSI escapes, or even raw escape sequences written by hand, works just as well:
+
+```rust
+let text = "\x1b[1;32mrunning\x1b[0m";
+```
+
 ## Configuration
 
 TxtView is configured through `TxtViewConfig` using `..TxtViewConfig::default()` to fill the remaining fields. It can toggle line numbers, the help bar, and the progress indicator, as well as fix the viewport width and height (it falls back to the terminal size when unset).
@@ -65,6 +98,9 @@ cargo run --example sample_text
 
 # View an arbitrary file
 cargo run --example view_file -- path/to/file.txt
+
+# Show the style gallery
+cargo run --example styled
 ```
 
 ## Building from Source
