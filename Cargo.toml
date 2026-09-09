@@ -2,8 +2,13 @@
 name = "txtview"
 version = "0.1.0"
 edition = "2024"
+description = "A lightweight terminal text viewer with scrolling, wrapping, line numbers, and an optional progress indicator"
+license = "MIT"
 repository = "https://github.com/iamdevstand/txtview"
 authors = ["Devstand"]
+keywords = ["terminal", "tui", "text-viewer", "crossterm"]
+categories = ["command-line-interface", "text-processing"]
+exclude = [".vscode/", ".zed/"]
 
 [dependencies]
 crossterm = { version = "0.29", default-features = false, features = ["events", "windows"] }
