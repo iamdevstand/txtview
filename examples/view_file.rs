@@ -9,6 +9,6 @@ fn main() -> std::io::Result<()> {
     let text =
         fs::read_to_string(&path).map_err(|e| std::io::Error::other(format!("{}: {}", path, e)))?;
 
-    let mut viewer = TxtView::new(&text);
+    let mut viewer = TxtView::new(text);
     viewer.run()
 }

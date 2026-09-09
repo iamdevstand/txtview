@@ -143,7 +143,7 @@ mod tests {
             viewport_width: Some(80),
             ..TxtViewConfig::default()
         };
-        let mut v = TxtView::new(&text(25)).with_config(config);
+        let mut v = TxtView::new(text(25)).with_config(config);
         v.jump_to_end();
         assert_eq!(v.offset, 15);
     }

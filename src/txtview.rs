@@ -35,16 +35,20 @@ impl TxtView {
     /// Create a viewer for the given text.
     ///
     /// The text is split into lines. Blank lines are preserved and a single
-    /// trailing newline is ignored.
+    /// trailing newline is ignored. Both borrowed and owned text are accepted:
     ///
     /// ```
     /// use txtview::TxtView;
     ///
     /// let viewer = TxtView::new("line one\nline two");
     /// assert_eq!(viewer.line_count(), 2);
+    ///
+    /// let owned = String::from("line one\nline two");
+    /// let viewer = TxtView::new(owned);
+    /// assert_eq!(viewer.line_count(), 2);
     /// ```
-    pub fn new(input: &str) -> Self {
-        let lines: Vec<String> = input.lines().map(String::from).collect();
+    pub fn new(input: impl AsRef<str>) -> Self {
+        let lines: Vec<String> = input.as_ref().lines().map(String::from).collect();
         let mut view = TxtView {
             rows_per_line: vec![1; lines.len()],
             lines,

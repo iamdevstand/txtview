@@ -55,6 +55,6 @@ fn main() {
         "".to_string(),
     ];
 
-    let mut viewer = TxtView::new(&lines.join("\n")).with_config(TxtViewConfig::default());
+    let mut viewer = TxtView::new(lines.join("\n")).with_config(TxtViewConfig::default());
     viewer.run().unwrap();
 }
