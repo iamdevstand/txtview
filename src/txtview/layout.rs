@@ -15,12 +15,22 @@ impl TxtView {
         terminal::size().unwrap_or((80, 24))
     }
 
-    pub(super) fn help_wrap_cols(&self) -> usize {
+    fn resolved_width(&self) -> usize {
         match self.config.viewport_width {
             Some(w) => w as usize,
             None => Self::term_size().0 as usize,
         }
-        .max(1)
+    }
+
+    fn resolved_height(&self) -> u16 {
+        match self.config.viewport_height {
+            Some(h) => h,
+            None => Self::term_size().1,
+        }
+    }
+
+    pub(super) fn help_wrap_cols(&self) -> usize {
+        self.resolved_width().max(1)
     }
 
     pub(super) fn help_text() -> String {
@@ -40,18 +50,12 @@ impl TxtView {
     }
 
     pub(super) fn visible_rows(&self) -> u16 {
-        let h = match self.config.viewport_height {
-            Some(h) => h,
-            None => Self::term_size().1,
-        };
-        h.saturating_sub(self.help_height() as u16)
+        self.resolved_height()
+            .saturating_sub(self.help_height() as u16)
     }
 
     fn layout_cols(&self) -> usize {
-        match self.config.viewport_width {
-            Some(w) => w as usize,
-            None => Self::term_size().0 as usize,
-        }
+        self.resolved_width()
     }
 
     fn rebuild_display(&mut self) {
