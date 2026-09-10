@@ -11,19 +11,19 @@ pub(super) struct ScrollGeometry {
 }
 
 impl TxtView {
-    fn term_size(&self) -> (u16, u16) {
+    fn term_size() -> (u16, u16) {
         terminal::size().unwrap_or((80, 24))
     }
 
     pub(super) fn help_wrap_cols(&self) -> usize {
         match self.config.viewport_width {
             Some(w) => w as usize,
-            None => self.term_size().0 as usize,
+            None => Self::term_size().0 as usize,
         }
         .max(1)
     }
 
-    pub(super) fn help_text(&self) -> String {
+    pub(super) fn help_text() -> String {
         "q: quit | ↑/↓, j/k, Mouse: scroll | PgUp/PgDn: page | Home/End, g/G: start/end".to_string()
     }
 
@@ -31,8 +31,7 @@ impl TxtView {
         if !self.config.show_help_bar {
             return 0;
         }
-        let lines = self
-            .help_text()
+        let lines = Self::help_text()
             .chars()
             .count()
             .div_ceil(self.help_wrap_cols())
@@ -43,7 +42,7 @@ impl TxtView {
     pub(super) fn visible_rows(&self) -> u16 {
         let h = match self.config.viewport_height {
             Some(h) => h,
-            None => self.term_size().1,
+            None => Self::term_size().1,
         };
         h.saturating_sub(self.help_height() as u16)
     }
@@ -51,7 +50,7 @@ impl TxtView {
     fn layout_cols(&self) -> usize {
         match self.config.viewport_width {
             Some(w) => w as usize,
-            None => self.term_size().0 as usize,
+            None => Self::term_size().0 as usize,
         }
     }
 

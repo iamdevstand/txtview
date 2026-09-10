@@ -63,7 +63,7 @@ impl TxtView {
         }
 
         let cols = self.help_wrap_cols();
-        let lines = wrap_lines(&self.help_text(), cols);
+        let lines = wrap_lines(&Self::help_text(), cols);
         let reserve = 1 + lines.len();
         if (rows as usize) < reserve {
             return Ok(());
