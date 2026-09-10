@@ -66,44 +66,46 @@ impl TxtView {
 
         loop {
             match event::read()? {
-                Event::Key(key) => match (key.code, key.modifiers) {
-                    (KeyCode::Char('q'), _)
-                    | (KeyCode::Char('c'), KeyModifiers::CONTROL)
-                    | (KeyCode::Esc, _) => {
-                        break;
-                    }
-                    (KeyCode::Down, _) | (KeyCode::Char('j'), _) => {
-                        let delta = self.scroll_down(1);
-                        self.apply_scroll(stdout, delta)?;
-                    }
-                    (KeyCode::Up, _) | (KeyCode::Char('k'), _) => {
-                        let delta = self.scroll_up(1);
-                        self.apply_scroll(stdout, delta)?;
-                    }
-                    (KeyCode::PageDown, _) => {
-                        if last_page_jump.elapsed() >= PAGE_JUMP_COOLDOWN {
-                            let delta = self.scroll_down(usize::from(self.visible_rows()));
-                            self.apply_scroll(stdout, delta)?;
-                            last_page_jump = Instant::now();
+                Event::Key(key) if key.kind == event::KeyEventKind::Press => {
+                    match (key.code, key.modifiers) {
+                        (KeyCode::Char('q'), _)
+                        | (KeyCode::Char('c'), KeyModifiers::CONTROL)
+                        | (KeyCode::Esc, _) => {
+                            break;
                         }
-                    }
-                    (KeyCode::PageUp, _) => {
-                        if last_page_jump.elapsed() >= PAGE_JUMP_COOLDOWN {
-                            let delta = self.scroll_up(usize::from(self.visible_rows()));
+                        (KeyCode::Down, _) | (KeyCode::Char('j'), _) => {
+                            let delta = self.scroll_down(1);
                             self.apply_scroll(stdout, delta)?;
-                            last_page_jump = Instant::now();
                         }
+                        (KeyCode::Up, _) | (KeyCode::Char('k'), _) => {
+                            let delta = self.scroll_up(1);
+                            self.apply_scroll(stdout, delta)?;
+                        }
+                        (KeyCode::PageDown, _) => {
+                            if last_page_jump.elapsed() >= PAGE_JUMP_COOLDOWN {
+                                let delta = self.scroll_down(usize::from(self.visible_rows()));
+                                self.apply_scroll(stdout, delta)?;
+                                last_page_jump = Instant::now();
+                            }
+                        }
+                        (KeyCode::PageUp, _) => {
+                            if last_page_jump.elapsed() >= PAGE_JUMP_COOLDOWN {
+                                let delta = self.scroll_up(usize::from(self.visible_rows()));
+                                self.apply_scroll(stdout, delta)?;
+                                last_page_jump = Instant::now();
+                            }
+                        }
+                        (KeyCode::Home, _) | (KeyCode::Char('g'), KeyModifiers::NONE) => {
+                            let delta = self.jump_to_start();
+                            self.apply_scroll(stdout, delta)?;
+                        }
+                        (KeyCode::End, _) | (KeyCode::Char('G'), _) => {
+                            let delta = self.jump_to_end();
+                            self.apply_scroll(stdout, delta)?;
+                        }
+                        _ => {}
                     }
-                    (KeyCode::Home, _) | (KeyCode::Char('g'), KeyModifiers::NONE) => {
-                        let delta = self.jump_to_start();
-                        self.apply_scroll(stdout, delta)?;
-                    }
-                    (KeyCode::End, _) | (KeyCode::Char('G'), _) => {
-                        let delta = self.jump_to_end();
-                        self.apply_scroll(stdout, delta)?;
-                    }
-                    _ => {}
-                },
+                }
                 Event::Mouse(mouse) => match mouse.kind {
                     MouseEventKind::ScrollUp => {
                         let delta = self.scroll_up(1);
