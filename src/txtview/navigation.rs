@@ -152,6 +152,7 @@ mod tests {
             .join("\n");
         let config = TxtViewConfig {
             show_help_bar: false,
+            show_scrollbar: false,
             viewport_height: Some(8),
             viewport_width: Some(10),
             ..TxtViewConfig::default()

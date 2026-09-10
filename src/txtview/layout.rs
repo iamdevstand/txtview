@@ -1,4 +1,5 @@
 use crossterm::terminal;
+use unicode_width::UnicodeWidthChar;
 
 use super::TxtView;
 
@@ -56,26 +57,30 @@ impl TxtView {
 
     fn rebuild_display(&mut self) {
         let cols = self.layout_cols().max(1);
+        let scrollbar_width = if self.config.show_scrollbar { 1 } else { 0 };
         let prefix_width = if self.config.show_line_numbers {
             self.lines.len().to_string().len() + 3
         } else {
             0
         };
-        let avail = cols.saturating_sub(prefix_width).max(1);
+        let avail = cols
+            .saturating_sub(prefix_width)
+            .saturating_sub(scrollbar_width)
+            .max(1);
 
         let mut display = Vec::new();
         let mut rows_per_line = Vec::with_capacity(self.lines.len());
 
         for (i, line) in self.lines.iter().enumerate() {
-            let chars: Vec<char> = line.chars().collect();
             let mut rows = 0usize;
-            if chars.is_empty() {
+            if line.is_empty() {
                 display.push(self.line_prefix(i, 0));
                 rows = 1;
             } else {
-                for (ci, chunk) in chars.chunks(avail).enumerate() {
+                let chunks = wrap_line_ansi(line, avail);
+                for (ci, chunk) in chunks.iter().enumerate() {
                     let mut row = self.line_prefix(i, ci);
-                    row.extend(chunk.iter());
+                    row.push_str(chunk);
                     display.push(row);
                     rows += 1;
                 }
@@ -133,5 +138,138 @@ impl TxtView {
         let travel = (g.visible as i64 - g.size as i64).max(1);
         let clamped = top.clamp(0, travel);
         (clamped * self.max_offset as i64 / travel) as usize
+    }
+}
+
+fn wrap_line_ansi(line: &str, width: usize) -> Vec<String> {
+    let width = width.max(1);
+    let bytes = line.as_bytes();
+    let mut chunks = Vec::new();
+    let mut current_chunk = String::new();
+    let mut visible_width = 0;
+    let mut ansi_state = String::new();
+
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == 0x1b {
+            let seq_start = i;
+            i += 1;
+            if i < bytes.len() && bytes[i] == b'[' {
+                i += 1;
+                while i < bytes.len() && !bytes[i].is_ascii_alphabetic() {
+                    i += 1;
+                }
+                if i < bytes.len() {
+                    i += 1;
+                }
+            }
+            let seq = &line[seq_start..i];
+            current_chunk.push_str(seq);
+            if seq.ends_with('m') {
+                if seq == "\x1b[0m" {
+                    ansi_state.clear();
+                } else {
+                    ansi_state.push_str(seq);
+                }
+            }
+        } else {
+            let ch_start = i;
+            i += 1;
+            while i < bytes.len() && (bytes[i] & 0xC0) == 0x80 {
+                i += 1;
+            }
+            let ch = &line[ch_start..i];
+            let ch_width = ch.chars().next().map_or(1, |c| c.width().unwrap_or(1));
+            if visible_width + ch_width > width && !current_chunk.is_empty() {
+                if !ansi_state.is_empty() {
+                    current_chunk.push_str("\x1b[0m");
+                }
+                chunks.push(current_chunk);
+                current_chunk = String::new();
+                visible_width = 0;
+                if !ansi_state.is_empty() {
+                    current_chunk.push_str(&ansi_state);
+                }
+            }
+            current_chunk.push_str(ch);
+            visible_width += ch_width;
+        }
+    }
+
+    if !current_chunk.is_empty() {
+        if !ansi_state.is_empty() {
+            current_chunk.push_str("\x1b[0m");
+        }
+        chunks.push(current_chunk);
+    }
+
+    if chunks.is_empty() {
+        chunks.push(String::new());
+    }
+
+    chunks
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ansi_single_style_fits_one_row() {
+        let line = "\x1b[31mhello\x1b[0m";
+        let chunks = wrap_line_ansi(line, 10);
+        assert_eq!(chunks, vec!["\x1b[31mhello\x1b[0m"]);
+    }
+
+    #[test]
+    fn ansi_wraps_without_splitting_codes() {
+        let line = "\x1b[31m12345\x1b[0m";
+        let chunks = wrap_line_ansi(line, 3);
+        assert_eq!(chunks.len(), 2);
+        assert!(chunks[0].contains("\x1b[31m"));
+        assert!(chunks[0].contains("123"));
+        assert!(chunks[0].ends_with("\x1b[0m"));
+        assert!(chunks[1].contains("\x1b[31m"));
+        assert!(chunks[1].contains("45"));
+        assert!(chunks[1].ends_with("\x1b[0m"));
+    }
+
+    #[test]
+    fn ansi_state_cleared_by_reset() {
+        let line = "\x1b[31mabc\x1b[0mdefghi";
+        let chunks = wrap_line_ansi(line, 3);
+        assert_eq!(chunks.len(), 3);
+        assert_eq!(chunks[0], "\x1b[31mabc\x1b[0m");
+        assert_eq!(chunks[1], "def");
+        assert_eq!(chunks[2], "ghi");
+    }
+
+    #[test]
+    fn plain_text_unchanged() {
+        let line = "hello world";
+        let chunks = wrap_line_ansi(line, 5);
+        assert_eq!(chunks, vec!["hello", " worl", "d"]);
+    }
+
+    #[test]
+    fn empty_line_returns_empty_string() {
+        let chunks = wrap_line_ansi("", 10);
+        assert_eq!(chunks, vec![""]);
+    }
+
+    #[test]
+    fn cjk_chars_wrap_by_visual_width() {
+        let chunks = wrap_line_ansi("一二三四五六七八九十", 10);
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0], "一二三四五");
+        assert_eq!(chunks[1], "六七八九十");
+    }
+
+    #[test]
+    fn mixed_ascii_cjk_wrap_correctly() {
+        let chunks = wrap_line_ansi("A中B日C", 5);
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0], "A中B");
+        assert_eq!(chunks[1], "日C");
     }
 }
