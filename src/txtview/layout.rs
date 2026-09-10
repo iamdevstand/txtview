@@ -211,6 +211,26 @@ fn wrap_line_ansi(line: &str, width: usize) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::TxtViewConfig;
+
+    fn viewer(input: &str, width: u16) -> TxtView {
+        let config = TxtViewConfig {
+            show_help_bar: false,
+            show_scrollbar: false,
+            viewport_width: Some(width),
+            viewport_height: Some(10),
+            ..TxtViewConfig::default()
+        };
+        TxtView::new(input).with_config(config)
+    }
+
+    const LINE_NUMBERS: TxtViewConfig = TxtViewConfig {
+        show_help_bar: false,
+        show_scrollbar: false,
+        show_line_numbers: true,
+        viewport_width: Some(8),
+        viewport_height: Some(10),
+    };
 
     #[test]
     fn ansi_single_style_fits_one_row() {
@@ -264,10 +284,90 @@ mod tests {
     }
 
     #[test]
+    fn japanese_chars_wrap_by_visual_width() {
+        let chunks = wrap_line_ansi("ひらがなカタカナ", 8);
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0], "ひらがな");
+        assert_eq!(chunks[1], "カタカナ");
+    }
+
+    #[test]
+    fn korean_chars_wrap_by_visual_width() {
+        let chunks = wrap_line_ansi("한국어테스트", 8);
+        assert_eq!(chunks.len(), 2);
+        assert_eq!(chunks[0], "한국어테");
+        assert_eq!(chunks[1], "스트");
+    }
+
+    #[test]
     fn mixed_ascii_cjk_wrap_correctly() {
         let chunks = wrap_line_ansi("A中B日C", 5);
         assert_eq!(chunks.len(), 2);
         assert_eq!(chunks[0], "A中B");
         assert_eq!(chunks[1], "日C");
+    }
+
+    #[test]
+    fn mixed_ascii_japanese_wrap_correctly() {
+        let chunks = wrap_line_ansi("A日本語B", 4);
+        assert_eq!(chunks.len(), 3);
+        assert_eq!(chunks[0], "A日");
+        assert_eq!(chunks[1], "本語");
+        assert_eq!(chunks[2], "B");
+    }
+
+    #[test]
+    fn display_single_row_per_line_when_fits() {
+        let v = viewer("abc\ndef\nghi", 80);
+        assert_eq!(v.display, vec!["abc", "def", "ghi"]);
+    }
+
+    #[test]
+    fn display_wraps_long_lines() {
+        let v = viewer("abcdefghij", 4);
+        assert_eq!(v.display, vec!["abcd", "efgh", "ij"]);
+    }
+
+    #[test]
+    fn display_preserves_empty_lines() {
+        let v = viewer("a\n\nb", 10);
+        assert_eq!(v.display, vec!["a", "", "b"]);
+    }
+
+    #[test]
+    fn display_adds_line_number_prefix() {
+        let v = TxtView::new("abc\ndef").with_config(LINE_NUMBERS);
+        assert_eq!(v.display, vec!["1 │ abc", "2 │ def"]);
+    }
+
+    #[test]
+    fn display_carries_prefix_to_wrapped_rows() {
+        let v = TxtView::new("abcdefghijk").with_config(LINE_NUMBERS);
+        assert_eq!(v.display, vec!["1 │ abcd", "↳ │ efgh", "↳ │ ijk"]);
+    }
+
+    #[test]
+    fn display_reserves_scrollbar_column() {
+        let config = TxtViewConfig {
+            show_help_bar: false,
+            show_scrollbar: true,
+            viewport_width: Some(4),
+            viewport_height: Some(10),
+            ..TxtViewConfig::default()
+        };
+        let v = TxtView::new("abcdef").with_config(config);
+        assert_eq!(v.display, vec!["abc", "def"]);
+    }
+
+    #[test]
+    fn display_counts_wide_chars_by_visual_width() {
+        let v = viewer("ひらがなカタカナ", 8);
+        assert_eq!(v.display, vec!["ひらがな", "カタカナ"]);
+    }
+
+    #[test]
+    fn display_keeps_ansi_codes_intact() {
+        let v = viewer("\x1b[31m12345\x1b[0m", 3);
+        assert_eq!(v.display, vec!["\x1b[31m123\x1b[0m", "\x1b[31m45\x1b[0m"]);
     }
 }

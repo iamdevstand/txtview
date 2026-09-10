@@ -179,7 +179,7 @@ mod tests {
             let off = v.offset_from_thumb_top(i64::from(mouse_y), &g);
             v.offset = off;
             let moved = v.scroll_geometry(visible).unwrap();
-            let travel = usize::try_from(g.visible - g.size).unwrap_or(usize::MAX);
+            let travel = g.visible - g.size;
             let desired = usize::from(mouse_y).clamp(0, travel);
             assert!(
                 moved.top.abs_diff(desired) <= 1,
