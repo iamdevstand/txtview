@@ -69,23 +69,18 @@ impl TxtView {
             .max(1);
 
         let mut display = Vec::new();
-        let mut rows_per_line = Vec::with_capacity(self.lines.len());
 
         for (i, line) in self.lines.iter().enumerate() {
-            let mut rows = 0usize;
             if line.is_empty() {
                 display.push(self.line_prefix(i, 0));
-                rows = 1;
             } else {
                 let chunks = wrap_line_ansi(line, avail);
                 for (ci, chunk) in chunks.iter().enumerate() {
                     let mut row = self.line_prefix(i, ci);
                     row.push_str(chunk);
                     display.push(row);
-                    rows += 1;
                 }
             }
-            rows_per_line.push(rows);
         }
 
         self.display = display;
