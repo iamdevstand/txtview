@@ -11,7 +11,7 @@ pub(super) struct ScrollGeometry {
 }
 
 impl TxtView {
-    fn term_size() -> (u16, u16) {
+    pub(super) fn term_size() -> (u16, u16) {
         terminal::size().unwrap_or((80, 24))
     }
 

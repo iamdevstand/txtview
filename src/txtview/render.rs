@@ -3,14 +3,14 @@ use std::io;
 use crossterm::{
     cursor::MoveTo,
     queue,
-    terminal::{self, Clear, ClearType},
+    terminal::{Clear, ClearType},
 };
 
 use super::TxtView;
 
 impl TxtView {
     pub(super) fn draw(&mut self, stdout: &mut impl io::Write) -> io::Result<()> {
-        let rows = terminal::size()?.1;
+        let rows = Self::term_size().1;
         self.refresh_bounds();
 
         let visible = usize::from(self.visible_rows());
