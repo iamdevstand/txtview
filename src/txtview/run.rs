@@ -82,14 +82,14 @@ impl TxtView {
                     }
                     (KeyCode::PageDown, _) => {
                         if last_page_jump.elapsed() >= PAGE_JUMP_COOLDOWN {
-                            let delta = self.scroll_down(self.visible_rows() as usize);
+                            let delta = self.scroll_down(usize::from(self.visible_rows()));
                             self.apply_scroll(stdout, delta)?;
                             last_page_jump = Instant::now();
                         }
                     }
                     (KeyCode::PageUp, _) => {
                         if last_page_jump.elapsed() >= PAGE_JUMP_COOLDOWN {
-                            let delta = self.scroll_up(self.visible_rows() as usize);
+                            let delta = self.scroll_up(usize::from(self.visible_rows()));
                             self.apply_scroll(stdout, delta)?;
                             last_page_jump = Instant::now();
                         }
@@ -114,11 +114,11 @@ impl TxtView {
                         self.apply_scroll(stdout, delta)?;
                     }
                     MouseEventKind::Down(MouseButton::Left) => {
-                        let visible = self.visible_rows() as usize;
+                        let visible = usize::from(self.visible_rows());
                         if let Some(g) = self.scroll_geometry(visible)
                             && mouse.column == g.column
                         {
-                            let y = mouse.row as usize;
+                            let y = usize::from(mouse.row);
                             if y >= g.top && y < g.top + g.size {
                                 self.dragging = true;
                                 self.drag_grab_offset = y - g.top;
@@ -126,7 +126,10 @@ impl TxtView {
                             } else {
                                 let size = g.size.max(1);
                                 let center = y.saturating_sub(size / 2);
-                                let target = self.offset_from_thumb_top(center as i64, &g);
+                                let target = self.offset_from_thumb_top(
+                                    i64::try_from(center).unwrap_or(i64::MAX),
+                                    &g,
+                                );
                                 let delta = self.scroll_to(target);
                                 self.apply_scroll(stdout, delta)?;
                                 self.dragging = true;
@@ -135,8 +138,9 @@ impl TxtView {
                         }
                     }
                     MouseEventKind::Drag(MouseButton::Left) if self.dragging => {
-                        if let Some(g) = self.scroll_geometry(self.visible_rows() as usize) {
-                            let top = mouse.row as i64 - self.drag_grab_offset as i64;
+                        if let Some(g) = self.scroll_geometry(usize::from(self.visible_rows())) {
+                            let top = i64::from(mouse.row)
+                                - i64::try_from(self.drag_grab_offset).unwrap_or(i64::MAX);
                             let target = self.offset_from_thumb_top(top, &g);
                             let delta = self.scroll_to(target);
                             self.apply_scroll(stdout, delta)?;

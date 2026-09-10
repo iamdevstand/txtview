@@ -13,7 +13,7 @@ impl TxtView {
         let rows = terminal::size()?.1;
         self.refresh_bounds();
 
-        let visible = self.visible_rows() as usize;
+        let visible = usize::from(self.visible_rows());
 
         self.render_rows(stdout, 0..visible)?;
         self.render_scrollbar(stdout, visible)?;
@@ -35,7 +35,11 @@ impl TxtView {
                 .get(self.offset + i)
                 .map(String::as_str)
                 .unwrap_or("");
-            queue!(stdout, MoveTo(0, i as u16), Clear(ClearType::CurrentLine))?;
+            queue!(
+                stdout,
+                MoveTo(0, u16::try_from(i).unwrap_or(u16::MAX)),
+                Clear(ClearType::CurrentLine)
+            )?;
             write!(stdout, "{}", text)?;
         }
         Ok(())
@@ -51,7 +55,10 @@ impl TxtView {
             } else {
                 '░'
             };
-            queue!(stdout, MoveTo(g.column, i as u16))?;
+            queue!(
+                stdout,
+                MoveTo(g.column, u16::try_from(i).unwrap_or(u16::MAX))
+            )?;
             write!(stdout, "{}", ch)?;
         }
         Ok(())
@@ -65,14 +72,14 @@ impl TxtView {
         let cols = self.help_wrap_cols();
         let lines = wrap_lines(&Self::help_text(), cols);
         let reserve = 1 + lines.len();
-        if (rows as usize) < reserve {
+        if usize::from(rows) < reserve {
             return Ok(());
         }
-        let base = rows as usize - reserve;
+        let base = usize::from(rows) - reserve;
 
         queue!(
             stdout,
-            MoveTo(0, base as u16),
+            MoveTo(0, u16::try_from(base).unwrap_or(u16::MAX)),
             Clear(ClearType::CurrentLine)
         )?;
         write!(stdout, "{}", "─".repeat(cols))?;
@@ -80,7 +87,7 @@ impl TxtView {
         for (i, line) in lines.iter().enumerate() {
             queue!(
                 stdout,
-                MoveTo(0, (base + 1 + i) as u16),
+                MoveTo(0, u16::try_from(base + 1 + i).unwrap_or(u16::MAX)),
                 Clear(ClearType::CurrentLine)
             )?;
             write!(stdout, "{}", line)?;
@@ -126,7 +133,7 @@ mod tests {
         let mut v = viewer(25);
         assert!(v.max_offset > 0);
         let mut out = Vec::new();
-        v.render_scrollbar(&mut out, v.visible_rows() as usize)
+        v.render_scrollbar(&mut out, usize::from(v.visible_rows()))
             .unwrap();
         let s = String::from_utf8(out).unwrap();
         assert!(s.contains('█'), "expected a thumb in output: {s:?}");
@@ -137,7 +144,7 @@ mod tests {
         let mut v = viewer(5);
         assert_eq!(v.max_offset, 0);
         let mut out = Vec::new();
-        v.render_scrollbar(&mut out, v.visible_rows() as usize)
+        v.render_scrollbar(&mut out, usize::from(v.visible_rows()))
             .unwrap();
         assert!(out.is_empty(), "expected no output: {out:?}");
     }
@@ -145,9 +152,9 @@ mod tests {
     #[test]
     fn offset_from_thumb_top_is_monotonic_and_bounded() {
         let v = viewer(100);
-        let visible = v.visible_rows() as usize;
+        let visible = usize::from(v.visible_rows());
         let g = v.scroll_geometry(visible).expect("scrollbar present");
-        let travel = (g.visible - g.size) as i64;
+        let travel = i64::try_from(g.visible - g.size).unwrap_or(i64::MAX);
 
         assert_eq!(v.offset_from_thumb_top(-5, &g), 0);
         assert_eq!(v.offset_from_thumb_top(0, &g), 0);
@@ -168,11 +175,12 @@ mod tests {
         let visible = v.visible_rows() as usize;
         let g = v.scroll_geometry(visible).unwrap();
 
-        for mouse_y in 0..visible as u16 {
-            let off = v.offset_from_thumb_top(mouse_y as i64, &g);
+        for mouse_y in 0..u16::try_from(visible).unwrap_or(u16::MAX) {
+            let off = v.offset_from_thumb_top(i64::from(mouse_y), &g);
             v.offset = off;
             let moved = v.scroll_geometry(visible).unwrap();
-            let desired = (mouse_y as i64).clamp(0, (g.visible - g.size) as i64) as usize;
+            let travel = usize::try_from(g.visible - g.size).unwrap_or(usize::MAX);
+            let desired = usize::from(mouse_y).clamp(0, travel);
             assert!(
                 moved.top.abs_diff(desired) <= 1,
                 "thumb at {} dragged to {} for y={}",

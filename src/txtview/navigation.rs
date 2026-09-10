@@ -2,33 +2,31 @@ use super::TxtView;
 
 impl TxtView {
     pub(crate) fn scroll_down(&mut self, amount: usize) -> isize {
-        let old = self.offset as isize;
-        self.offset = self.offset.saturating_add(amount).min(self.max_offset);
-        self.offset as isize - old
+        self.move_offset(self.offset.saturating_add(amount))
     }
 
     pub(crate) fn scroll_to(&mut self, offset: usize) -> isize {
-        let old = self.offset as isize;
-        self.offset = offset.min(self.max_offset);
-        self.offset as isize - old
+        self.move_offset(offset)
     }
 
     pub(crate) fn scroll_up(&mut self, amount: usize) -> isize {
-        let old = self.offset as isize;
-        self.offset = self.offset.saturating_sub(amount);
-        self.offset as isize - old
+        self.move_offset(self.offset.saturating_sub(amount))
     }
 
     pub(crate) fn jump_to_start(&mut self) -> isize {
-        let old = self.offset as isize;
-        self.offset = 0;
-        self.offset as isize - old
+        self.move_offset(0)
     }
 
     pub(crate) fn jump_to_end(&mut self) -> isize {
-        let old = self.offset as isize;
-        self.offset = self.max_offset;
-        self.offset as isize - old
+        self.move_offset(self.max_offset)
+    }
+
+    fn move_offset(&mut self, target: usize) -> isize {
+        let old = self.offset;
+        self.offset = target.min(self.max_offset);
+        let diff = self.offset.abs_diff(old);
+        let signed = isize::try_from(diff).unwrap_or(isize::MAX);
+        if self.offset >= old { signed } else { -signed }
     }
 }
 

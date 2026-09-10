@@ -17,8 +17,8 @@ impl TxtView {
 
     fn resolved_width(&self) -> usize {
         match self.config.viewport_width {
-            Some(w) => w as usize,
-            None => Self::term_size().0 as usize,
+            Some(w) => usize::from(w),
+            None => usize::from(Self::term_size().0),
         }
     }
 
@@ -51,7 +51,7 @@ impl TxtView {
 
     pub(super) fn visible_rows(&self) -> u16 {
         self.resolved_height()
-            .saturating_sub(self.help_height() as u16)
+            .saturating_sub(u16::try_from(self.help_height()).unwrap_or(u16::MAX))
     }
 
     fn layout_cols(&self) -> usize {
@@ -104,7 +104,7 @@ impl TxtView {
 
     pub(super) fn refresh_bounds(&mut self) {
         self.rebuild_display();
-        let vr = self.visible_rows() as usize;
+        let vr = usize::from(self.visible_rows());
         self.max_offset = self.display.len().saturating_sub(vr);
         self.clamp_offset();
     }
@@ -123,7 +123,7 @@ impl TxtView {
         let thumb = (visible * visible / total).max(1).min(visible);
         let top = (self.offset * (visible - thumb) / self.max_offset).min(visible - thumb);
         Some(ScrollGeometry {
-            column: self.help_wrap_cols().saturating_sub(1) as u16,
+            column: u16::try_from(self.help_wrap_cols().saturating_sub(1)).unwrap_or(u16::MAX),
             top,
             size: thumb,
             visible,
@@ -133,9 +133,9 @@ impl TxtView {
     /// Map a thumb-top row (0..visible) to a scroll offset using the same
     /// proportion that [`TxtView::scroll_geometry`] uses in reverse.
     pub(super) fn offset_from_thumb_top(&self, top: i64, g: &ScrollGeometry) -> usize {
-        let travel = (g.visible as i64 - g.size as i64).max(1);
-        let clamped = top.clamp(0, travel);
-        (clamped * self.max_offset as i64 / travel) as usize
+        let travel = g.visible.saturating_sub(g.size).max(1);
+        let clamped = usize::try_from(top).unwrap_or(0).min(travel);
+        clamped.saturating_mul(self.max_offset) / travel
     }
 }
 
