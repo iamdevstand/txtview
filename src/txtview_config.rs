@@ -53,30 +53,35 @@ impl Default for TxtViewConfig {
 
 impl TxtViewConfig {
     /// Set whether line numbers are shown.
+    #[must_use]
     pub fn with_show_line_numbers(mut self, show: bool) -> Self {
         self.show_line_numbers = show;
         self
     }
 
     /// Set whether the keybinding help bar is shown.
+    #[must_use]
     pub fn with_show_help_bar(mut self, show: bool) -> Self {
         self.show_help_bar = show;
         self
     }
 
     /// Set whether the interactive scrollbar is shown.
+    #[must_use]
     pub fn with_show_scrollbar(mut self, show: bool) -> Self {
         self.show_scrollbar = show;
         self
     }
 
     /// Set a fixed viewport width in columns. `None` uses the terminal width.
+    #[must_use]
     pub fn with_viewport_width(mut self, width: Option<u16>) -> Self {
         self.viewport_width = width;
         self
     }
 
     /// Set a fixed viewport height in rows. `None` uses the terminal height.
+    #[must_use]
     pub fn with_viewport_height(mut self, height: Option<u16>) -> Self {
         self.viewport_height = height;
         self

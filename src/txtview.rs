@@ -74,6 +74,7 @@ impl TxtView {
     ///         ..TxtViewConfig::default()
     ///     });
     /// ```
+    #[must_use]
     pub fn with_config(mut self, config: TxtViewConfig) -> Self {
         self.config = config;
         self.refresh_bounds();
