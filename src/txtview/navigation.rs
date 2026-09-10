@@ -2,35 +2,30 @@ use super::TxtView;
 
 impl TxtView {
     pub(crate) fn scroll_down(&mut self, amount: usize) -> isize {
-        self.refresh_bounds();
         let old = self.offset as isize;
         self.offset = self.offset.saturating_add(amount).min(self.max_offset);
         self.offset as isize - old
     }
 
     pub(crate) fn scroll_to(&mut self, offset: usize) -> isize {
-        self.refresh_bounds();
         let old = self.offset as isize;
         self.offset = offset.min(self.max_offset);
         self.offset as isize - old
     }
 
     pub(crate) fn scroll_up(&mut self, amount: usize) -> isize {
-        self.refresh_bounds();
         let old = self.offset as isize;
         self.offset = self.offset.saturating_sub(amount);
         self.offset as isize - old
     }
 
     pub(crate) fn jump_to_start(&mut self) -> isize {
-        self.refresh_bounds();
         let old = self.offset as isize;
         self.offset = 0;
         self.offset as isize - old
     }
 
     pub(crate) fn jump_to_end(&mut self) -> isize {
-        self.refresh_bounds();
         let old = self.offset as isize;
         self.offset = self.max_offset;
         self.offset as isize - old
