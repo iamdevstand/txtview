@@ -42,17 +42,23 @@ impl TxtView {
         if !self.config.show_help_bar {
             return 0;
         }
+        let total = usize::from(self.resolved_height());
+        if total < 2 {
+            return 0;
+        }
         let lines = Self::help_text()
             .chars()
             .count()
             .div_ceil(self.help_wrap_cols())
-            .max(1);
+            .max(1)
+            .min(total - 2);
         1 + lines
     }
 
     pub(super) fn visible_rows(&self) -> u16 {
         self.resolved_height()
             .saturating_sub(u16::try_from(self.help_height()).unwrap_or(u16::MAX))
+            .max(1)
     }
 
     fn layout_cols(&self) -> usize {
@@ -451,6 +457,46 @@ mod tests {
             "scroll re-wrapped the whole document"
         );
         assert_eq!(v.offset, 50);
+    }
+
+    #[test]
+    fn visible_rows_keeps_one_row_on_narrow_width() {
+        let config = TxtViewConfig {
+            show_help_bar: true,
+            show_scrollbar: false,
+            viewport_width: Some(1),
+            viewport_height: Some(24),
+            ..TxtViewConfig::default()
+        };
+        let v = TxtView::new("hello\nworld").with_config(config);
+        assert_eq!(v.visible_rows(), 1);
+    }
+
+    #[test]
+    fn visible_rows_keeps_one_row_on_tiny_terminal() {
+        let config = TxtViewConfig {
+            show_help_bar: true,
+            show_scrollbar: false,
+            viewport_width: Some(80),
+            viewport_height: Some(2),
+            ..TxtViewConfig::default()
+        };
+        let v = TxtView::new("hello\nworld").with_config(config);
+        assert_eq!(v.visible_rows(), 1);
+    }
+
+    #[test]
+    fn visible_rows_unchanged_when_help_fits() {
+        let config = TxtViewConfig {
+            show_help_bar: true,
+            show_scrollbar: false,
+            viewport_width: Some(80),
+            viewport_height: Some(10),
+            ..TxtViewConfig::default()
+        };
+        let v = TxtView::new("hello\nworld").with_config(config);
+        let help = 1 + TxtView::help_text().chars().count().div_ceil(80).max(1);
+        assert_eq!(usize::from(v.visible_rows()), 10 - help);
     }
 
     #[test]

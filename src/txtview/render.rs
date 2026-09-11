@@ -69,13 +69,15 @@ impl TxtView {
             return Ok(());
         }
 
-        let cols = self.help_wrap_cols();
-        let lines = wrap_lines(&Self::help_text(), cols);
-        let reserve = 1 + lines.len();
-        if usize::from(rows) < reserve {
+        let total = usize::from(rows);
+        if total < 2 {
             return Ok(());
         }
-        let base = usize::from(rows) - reserve;
+
+        let cols = self.help_wrap_cols();
+        let lines = wrap_lines(&Self::help_text(), cols);
+        let shown = lines.len().min(total - 2);
+        let base = total - 1 - shown;
 
         queue!(
             stdout,
@@ -84,7 +86,7 @@ impl TxtView {
         )?;
         write!(stdout, "{}", "─".repeat(cols))?;
 
-        for (i, line) in lines.iter().enumerate() {
+        for (i, line) in lines.iter().take(shown).enumerate() {
             queue!(
                 stdout,
                 MoveTo(0, u16::try_from(base + 1 + i).unwrap_or(u16::MAX)),
@@ -185,6 +187,25 @@ mod tests {
         assert!(
             max_move_to_row(&out) <= 5,
             "draw escaped the 5-row viewport: {out:?}"
+        );
+    }
+
+    #[test]
+    fn help_bar_renders_on_narrow_terminal() {
+        let config = TxtViewConfig {
+            show_help_bar: true,
+            show_scrollbar: false,
+            viewport_height: Some(10),
+            viewport_width: Some(1),
+            ..TxtViewConfig::default()
+        };
+        let mut v = TxtView::new("a\nb\nc").with_config(config);
+        let mut out = Vec::new();
+        v.render_help_bar(&mut out, v.resolved_height()).unwrap();
+        assert!(!out.is_empty(), "help bar must render on a narrow terminal");
+        assert!(
+            max_move_to_row(&out) <= 10,
+            "help bar escaped the 10-row viewport: {out:?}"
         );
     }
 
