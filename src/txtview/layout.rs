@@ -77,7 +77,7 @@ impl TxtView {
             if line.is_empty() {
                 display.push(self.line_prefix(i, 0));
             } else {
-                let chunks = wrap_line_ansi(line, avail);
+                let chunks = wrap_line_ansi(line, avail, prefix_width);
                 for (ci, chunk) in chunks.iter().enumerate() {
                     let mut row = self.line_prefix(i, ci);
                     row.push_str(chunk);
@@ -139,7 +139,8 @@ impl TxtView {
     }
 }
 
-fn wrap_line_ansi(line: &str, width: usize) -> Vec<String> {
+fn wrap_line_ansi(line: &str, width: usize, start_col: usize) -> Vec<String> {
+    const TAB_WIDTH: usize = 8;
     let width = width.max(1);
     let bytes = line.as_bytes();
     let mut chunks = Vec::new();
@@ -177,7 +178,11 @@ fn wrap_line_ansi(line: &str, width: usize) -> Vec<String> {
                 i += 1;
             }
             let ch = &line[ch_start..i];
-            let ch_width = ch.chars().next().map_or(1, |c| c.width().unwrap_or(1));
+            let ch_width = match ch.chars().next() {
+                Some('\t') => TAB_WIDTH - (start_col + visible_width) % TAB_WIDTH,
+                Some(c) => c.width().unwrap_or(1),
+                None => 1,
+            };
             if visible_width + ch_width > width && !current_chunk.is_empty() {
                 if !ansi_state.is_empty() {
                     current_chunk.push_str("\x1b[0m");
@@ -235,14 +240,14 @@ mod tests {
     #[test]
     fn ansi_single_style_fits_one_row() {
         let line = "\x1b[31mhello\x1b[0m";
-        let chunks = wrap_line_ansi(line, 10);
+        let chunks = wrap_line_ansi(line, 10, 0);
         assert_eq!(chunks, vec!["\x1b[31mhello\x1b[0m"]);
     }
 
     #[test]
     fn ansi_wraps_without_splitting_codes() {
         let line = "\x1b[31m12345\x1b[0m";
-        let chunks = wrap_line_ansi(line, 3);
+        let chunks = wrap_line_ansi(line, 3, 0);
         assert_eq!(chunks.len(), 2);
         assert!(chunks[0].contains("\x1b[31m"));
         assert!(chunks[0].contains("123"));
@@ -255,7 +260,7 @@ mod tests {
     #[test]
     fn ansi_state_cleared_by_reset() {
         let line = "\x1b[31mabc\x1b[0mdefghi";
-        let chunks = wrap_line_ansi(line, 3);
+        let chunks = wrap_line_ansi(line, 3, 0);
         assert_eq!(chunks.len(), 3);
         assert_eq!(chunks[0], "\x1b[31mabc\x1b[0m");
         assert_eq!(chunks[1], "def");
@@ -265,19 +270,78 @@ mod tests {
     #[test]
     fn plain_text_unchanged() {
         let line = "hello world";
-        let chunks = wrap_line_ansi(line, 5);
+        let chunks = wrap_line_ansi(line, 5, 0);
         assert_eq!(chunks, vec!["hello", " worl", "d"]);
     }
 
     #[test]
+    fn tab_advances_to_next_stop() {
+        let chunks = wrap_line_ansi("a\tb", 8, 0);
+        assert_eq!(chunks, vec!["a\t", "b"]);
+    }
+
+    #[test]
+    fn tab_overshoots_own_row_when_it_does_not_fit() {
+        let chunks = wrap_line_ansi("a\tb", 5, 0);
+        assert_eq!(chunks, vec!["a", "\t", "b"]);
+    }
+
+    #[test]
+    fn tab_at_column_zero_advances_full_width() {
+        let chunks = wrap_line_ansi("\t\tx", 8, 0);
+        assert_eq!(chunks, vec!["\t", "\t", "x"]);
+    }
+
+    #[test]
+    fn tab_advance_accounts_for_prefix_column() {
+        assert_eq!(wrap_line_ansi("\tX", 5, 0), vec!["\t", "X"]);
+        assert_eq!(wrap_line_ansi("\tX", 5, 5), vec!["\tX"]);
+    }
+
+    #[test]
+    fn tab_wrapped_line_renders_correctly() {
+        let v = viewer("a\tb", 8);
+        assert_eq!(v.display, vec!["a\t", "b"]);
+    }
+
+    #[test]
+    fn mid_tab_stop_wraps_tab_followed_by_text() {
+        let chunks = wrap_line_ansi("abcdefgh\tx", 12, 0);
+        assert_eq!(chunks, vec!["abcdefgh", "\tx"]);
+    }
+
+    #[test]
+    fn tab_mid_line_wraps_after_the_stop() {
+        assert_eq!(wrap_line_ansi("abc\tdef", 8, 0), vec!["abc\t", "def"]);
+        assert_eq!(wrap_line_ansi("ab\tcde", 8, 0), vec!["ab\t", "cde"]);
+    }
+
+    #[test]
+    fn tab_at_line_end_and_following_wrap() {
+        assert_eq!(wrap_line_ansi("ab\tcd", 4, 0), vec!["ab", "\t", "cd"]);
+    }
+
+    #[test]
+    fn tab_survives_ansi_prefix_replay_on_next_row() {
+        let chunks = wrap_line_ansi("\x1b[31mabcd\tef\x1b[0m", 8, 0);
+        assert_eq!(chunks, vec!["\x1b[31mabcd\t\x1b[0m", "\x1b[31mef\x1b[0m"]);
+    }
+
+    #[test]
+    fn tab_after_wide_char_counts_remaining_stop() {
+        assert_eq!(wrap_line_ansi("中\tx", 10, 0), vec!["中\tx"]);
+        assert_eq!(wrap_line_ansi("中\tx", 8, 0), vec!["中\t", "x"]);
+    }
+
+    #[test]
     fn empty_line_returns_empty_string() {
-        let chunks = wrap_line_ansi("", 10);
+        let chunks = wrap_line_ansi("", 10, 0);
         assert_eq!(chunks, vec![""]);
     }
 
     #[test]
     fn cjk_chars_wrap_by_visual_width() {
-        let chunks = wrap_line_ansi("一二三四五六七八九十", 10);
+        let chunks = wrap_line_ansi("一二三四五六七八九十", 10, 0);
         assert_eq!(chunks.len(), 2);
         assert_eq!(chunks[0], "一二三四五");
         assert_eq!(chunks[1], "六七八九十");
@@ -285,7 +349,7 @@ mod tests {
 
     #[test]
     fn japanese_chars_wrap_by_visual_width() {
-        let chunks = wrap_line_ansi("ひらがなカタカナ", 8);
+        let chunks = wrap_line_ansi("ひらがなカタカナ", 8, 0);
         assert_eq!(chunks.len(), 2);
         assert_eq!(chunks[0], "ひらがな");
         assert_eq!(chunks[1], "カタカナ");
@@ -293,7 +357,7 @@ mod tests {
 
     #[test]
     fn korean_chars_wrap_by_visual_width() {
-        let chunks = wrap_line_ansi("한국어테스트", 8);
+        let chunks = wrap_line_ansi("한국어테스트", 8, 0);
         assert_eq!(chunks.len(), 2);
         assert_eq!(chunks[0], "한국어테");
         assert_eq!(chunks[1], "스트");
@@ -301,7 +365,7 @@ mod tests {
 
     #[test]
     fn mixed_ascii_cjk_wrap_correctly() {
-        let chunks = wrap_line_ansi("A中B日C", 5);
+        let chunks = wrap_line_ansi("A中B日C", 5, 0);
         assert_eq!(chunks.len(), 2);
         assert_eq!(chunks[0], "A中B");
         assert_eq!(chunks[1], "日C");
@@ -309,7 +373,7 @@ mod tests {
 
     #[test]
     fn mixed_ascii_japanese_wrap_correctly() {
-        let chunks = wrap_line_ansi("A日本語B", 4);
+        let chunks = wrap_line_ansi("A日本語B", 4, 0);
         assert_eq!(chunks.len(), 3);
         assert_eq!(chunks[0], "A日");
         assert_eq!(chunks[1], "本語");
