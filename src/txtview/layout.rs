@@ -22,10 +22,11 @@ impl TxtView {
         }
     }
 
-    fn resolved_height(&self) -> u16 {
+    pub(super) fn resolved_height(&self) -> u16 {
+        let rows = Self::term_size().1;
         match self.config.viewport_height {
-            Some(h) => h,
-            None => Self::term_size().1,
+            Some(h) => h.min(rows),
+            None => rows,
         }
     }
 

@@ -10,7 +10,7 @@ use super::TxtView;
 
 impl TxtView {
     pub(super) fn draw(&mut self, stdout: &mut impl io::Write) -> io::Result<()> {
-        let rows = Self::term_size().1;
+        let rows = self.resolved_height();
         self.refresh_bounds();
 
         let visible = usize::from(self.visible_rows());
@@ -111,7 +111,7 @@ fn wrap_lines(s: &str, width: usize) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::TxtView;
+    use super::*;
     use crate::TxtViewConfig;
 
     fn viewer(n: usize) -> TxtView {
@@ -126,6 +126,66 @@ mod tests {
             ..TxtViewConfig::default()
         };
         TxtView::new(&text).with_config(config)
+    }
+
+    fn max_move_to_row(out: &[u8]) -> usize {
+        let s = String::from_utf8_lossy(out);
+        s.split("\x1b[")
+            .filter_map(|m| {
+                let rest = m.strip_suffix('H')?;
+                rest.split_once(';')?.0.parse::<usize>().ok()
+            })
+            .max()
+            .unwrap_or(0)
+    }
+
+    #[test]
+    fn draw_clamps_oversized_viewport_to_terminal() {
+        let text = (0..100)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let config = TxtViewConfig {
+            viewport_height: Some(80),
+            viewport_width: Some(80),
+            show_help_bar: true,
+            show_scrollbar: false,
+            ..TxtViewConfig::default()
+        };
+        let mut v = TxtView::new(&text).with_config(config);
+
+        let rows = usize::from(TxtView::term_size().1);
+        assert!(
+            usize::from(v.visible_rows()) <= rows,
+            "viewport {} exceeds terminal height {rows}",
+            v.visible_rows()
+        );
+
+        let mut out = Vec::new();
+        v.draw(&mut out).unwrap();
+        assert!(
+            max_move_to_row(&out) <= rows,
+            "draw wrote past terminal height {rows}: {out:?}"
+        );
+    }
+
+    #[test]
+    fn draw_keeps_small_viewport_self_contained() {
+        let config = TxtViewConfig {
+            viewport_height: Some(5),
+            viewport_width: Some(80),
+            show_help_bar: true,
+            show_scrollbar: false,
+            ..TxtViewConfig::default()
+        };
+        let mut v = TxtView::new("a\nb\nc\nd\ne\nf").with_config(config);
+
+        let mut out = Vec::new();
+        v.draw(&mut out).unwrap();
+        assert!(
+            max_move_to_row(&out) <= 5,
+            "draw escaped the 5-row viewport: {out:?}"
+        );
     }
 
     #[test]
