@@ -59,7 +59,7 @@ impl TxtView {
         self.resolved_width()
     }
 
-    fn rebuild_display(&mut self) {
+    fn layout_geometry(&self) -> (usize, usize) {
         let cols = self.layout_cols().max(1);
         let scrollbar_width = if self.config.show_scrollbar { 1 } else { 0 };
         let prefix_width = if self.config.show_line_numbers {
@@ -71,6 +71,16 @@ impl TxtView {
             .saturating_sub(prefix_width)
             .saturating_sub(scrollbar_width)
             .max(1);
+        (avail, prefix_width)
+    }
+
+    fn rebuild_display(&mut self) {
+        #[cfg(test)]
+        {
+            self.rebuild_count += 1;
+        }
+        let (avail, prefix_width) = self.layout_geometry();
+        self.display_geometry = Some((avail, prefix_width));
 
         let mut display = Vec::new();
 
@@ -104,7 +114,9 @@ impl TxtView {
     }
 
     pub(super) fn refresh_bounds(&mut self) {
-        self.rebuild_display();
+        if self.display_geometry != Some(self.layout_geometry()) {
+            self.rebuild_display();
+        }
         let vr = usize::from(self.visible_rows());
         self.max_offset = self.display.len().saturating_sub(vr);
         self.clamp_offset();
@@ -422,6 +434,58 @@ mod tests {
         };
         let v = TxtView::new("abcdef").with_config(config);
         assert_eq!(v.display, vec!["abc", "def"]);
+    }
+
+    #[test]
+    fn offset_only_scroll_skips_display_rebuild() {
+        let input = (0..100)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut v = viewer(&input, 10);
+        let built = v.rebuild_count;
+        v.scroll_down(50);
+        v.refresh_bounds();
+        assert_eq!(
+            v.rebuild_count, built,
+            "scroll re-wrapped the whole document"
+        );
+        assert_eq!(v.offset, 50);
+    }
+
+    #[test]
+    fn width_change_rebuilds_display() {
+        let config = |w| TxtViewConfig {
+            show_help_bar: false,
+            show_scrollbar: false,
+            viewport_width: Some(w),
+            viewport_height: Some(10),
+            ..TxtViewConfig::default()
+        };
+        let mut v = TxtView::new("abcdefghij").with_config(config(10));
+        let n = v.rebuild_count;
+        v = v.with_config(config(5));
+        assert!(v.rebuild_count > n, "width change must re-wrap");
+    }
+
+    #[test]
+    fn height_change_reuses_display() {
+        let config = |h| TxtViewConfig {
+            show_help_bar: false,
+            viewport_width: Some(80),
+            viewport_height: Some(h),
+            ..TxtViewConfig::default()
+        };
+        let input = (0..100)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut v = TxtView::new(input).with_config(config(10));
+        let n = v.rebuild_count;
+        let m0 = v.max_offset;
+        v = v.with_config(config(20));
+        assert_eq!(v.rebuild_count, n, "height change must not re-wrap");
+        assert!(v.max_offset < m0);
     }
 
     #[test]
