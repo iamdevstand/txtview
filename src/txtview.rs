@@ -26,6 +26,7 @@ use crate::TxtViewConfig;
 /// pass through, and the active style is re-emitted compactly when a styled
 /// line wraps. Control bytes and other escape sequences are shown as visible
 /// caret notation. See [`TxtViewConfig`] for the available display options.
+#[derive(Debug, Clone)]
 pub struct TxtView {
     lines: Vec<String>,
     display: Vec<String>,
@@ -96,5 +97,21 @@ impl TxtView {
     /// The number of logical lines in the input.
     pub fn line_count(&self) -> usize {
         self.lines.len()
+    }
+
+    /// Returns a reference to the current configuration of this [`TxtView`].
+    ///
+    /// Use it to inspect the active settings or to build a modified config
+    /// and apply it via [`TxtView::with_config`].
+    ///
+    /// ```
+    /// use txtview::{TxtView, TxtViewConfig};
+    ///
+    /// let viewer = TxtView::new("hello");
+    /// let config = viewer.config();
+    /// assert!(!config.show_line_numbers);
+    /// ```
+    pub fn config(&self) -> &TxtViewConfig {
+        &self.config
     }
 }
