@@ -14,7 +14,7 @@ use crossterm::{
 
 use super::TxtView;
 
-const PAGE_JUMP_COOLDOWN: Duration = Duration::from_millis(250);
+const PAGE_JUMP_COOLDOWN: Duration = Duration::from_millis(200);
 
 /// Restores the terminal when dropped, so raw mode, the alternate screen,
 /// the hidden cursor and mouse capture are always cleaned up — even when a
@@ -72,7 +72,8 @@ impl TxtView {
     fn event_loop(&mut self, stdout: &mut impl io::Write) -> io::Result<()> {
         self.draw(stdout)?;
 
-        let mut last_page_jump = Instant::now();
+        let mut last_page_up_jump = Instant::now();
+        let mut last_page_down_jump = Instant::now();
 
         loop {
             match event::read()? {
@@ -92,17 +93,17 @@ impl TxtView {
                             self.apply_scroll(stdout, delta)?;
                         }
                         (KeyCode::PageDown, _) => {
-                            if last_page_jump.elapsed() >= PAGE_JUMP_COOLDOWN {
+                            if last_page_down_jump.elapsed() >= PAGE_JUMP_COOLDOWN {
                                 let delta = self.scroll_down(usize::from(self.visible_rows()));
                                 self.apply_scroll(stdout, delta)?;
-                                last_page_jump = Instant::now();
+                                last_page_down_jump = Instant::now();
                             }
                         }
                         (KeyCode::PageUp, _) => {
-                            if last_page_jump.elapsed() >= PAGE_JUMP_COOLDOWN {
+                            if last_page_up_jump.elapsed() >= PAGE_JUMP_COOLDOWN {
                                 let delta = self.scroll_up(usize::from(self.visible_rows()));
                                 self.apply_scroll(stdout, delta)?;
-                                last_page_jump = Instant::now();
+                                last_page_up_jump = Instant::now();
                             }
                         }
                         (KeyCode::Home, _) | (KeyCode::Char('g'), KeyModifiers::NONE) => {
