@@ -16,12 +16,26 @@ use super::TxtView;
 
 const PAGE_JUMP_COOLDOWN: Duration = Duration::from_millis(250);
 
+/// Restores the terminal when dropped, so raw mode, the alternate screen,
+/// the hidden cursor and mouse capture are always cleaned up — even when a
+/// panic unwinds through the viewer (issue #9).
+struct RestoreTerminal;
+
+impl Drop for RestoreTerminal {
+    fn drop(&mut self) {
+        let mut stdout = io::stdout();
+        let _ = execute!(stdout, DisableMouseCapture, LeaveAlternateScreen, Show);
+        let _ = terminal::disable_raw_mode();
+    }
+}
+
 impl TxtView {
     /// Show the viewer and block until the user quits.
     ///
     /// This takes over the terminal: it enters raw mode, switches to an
     /// alternate screen, hides the cursor, and enables mouse capture. The
-    /// terminal is always restored before returning, including on errors.
+    /// terminal is always restored before returning, including on errors or
+    /// a panic (cleanup runs from a `Drop` guard).
     ///
     /// # Errors
     ///
@@ -48,15 +62,11 @@ impl TxtView {
         }
 
         terminal::enable_raw_mode()?;
+        let _guard = RestoreTerminal;
         let mut stdout = io::BufWriter::with_capacity(256 * 1024, io::stdout());
 
-        let result = execute!(stdout, EnterAlternateScreen, Hide, EnableMouseCapture)
-            .and_then(|()| self.event_loop(&mut stdout));
-
-        let cleanup = execute!(stdout, DisableMouseCapture, LeaveAlternateScreen, Show)
-            .and_then(|()| terminal::disable_raw_mode());
-
-        result.and(cleanup)
+        execute!(stdout, EnterAlternateScreen, Hide, EnableMouseCapture)?;
+        self.event_loop(&mut stdout)
     }
 
     fn event_loop(&mut self, stdout: &mut impl io::Write) -> io::Result<()> {
