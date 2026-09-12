@@ -22,9 +22,10 @@ use crate::TxtViewConfig;
 ///     .with_config(TxtViewConfig::default());
 /// ```
 ///
-/// The content is written verbatim, so ANSI-styled text (for example built
-/// with crossterm's `style`) is rendered as-is. See [`TxtViewConfig`] for
-/// the available display options.
+/// ANSI styling is preserved: SGR color, style codes and OSC8 hyperlinks
+/// pass through, and the active style is re-emitted compactly when a styled
+/// line wraps. Control bytes and other escape sequences are shown as visible
+/// caret notation. See [`TxtViewConfig`] for the available display options.
 pub struct TxtView {
     lines: Vec<String>,
     display: Vec<String>,

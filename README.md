@@ -10,7 +10,7 @@
 - View any text in an alternate screen terminal session
 - Scroll line-by-line `↑/↓` or `j/k`, by page `PgUp`/`PgDn`, or with the mouse wheel
 - Jump to the start `Home`/`g` or the end `End`/`G` of the text
-- Automatic line wrapping to the viewport width, with continuation markers on wrapped rows
+- Automatic line wrapping to the viewport width, with continuation markers on wrapped rows (in the line-number column)
 - Optional line numbers
 - Optional help bar with keybinding hints
 - Optional interactive vertical scrollbar
@@ -45,7 +45,7 @@ fn main() {
 
 ## Styled Text
 
-TxtView writes your content verbatim, so any ANSI-styled text renders as-is. Build your styled strings with [crossterm](https://github.com/crossterm-rs/crossterm) (the same library TxtView uses internally, so adding it costs no extra build time):
+TxtView renders ANSI-styled text correctly: SGR color and style codes, plus OSC8 hyperlinks, pass through untouched, and when a styled line wraps the active style is preserved and re-emitted as a compact prefix on the wrapped rows. Control bytes and any other escape sequence are shown as visible caret notation (`^G`, `^[[2A`) rather than executed. Build your styled strings with [crossterm](https://github.com/crossterm-rs/crossterm) (the same library TxtView uses internally, so adding it costs no extra build time):
 
 ```toml
 [dependencies]
@@ -70,7 +70,7 @@ fn main() {
 }
 ```
 
-You are not tied to crossterm for styling, any library that emits ANSI escapes, or even raw escape sequences written by hand, works just as well:
+You are not tied to crossterm for styling. Any library that emits SGR styling codes, or even raw sequences written by hand, works just as well (other escape sequences are neutralized to visible text, so only styling and OSC8 links register):
 
 ```rust
 let text = "\x1b[1;32mrunning\x1b[0m";
@@ -100,6 +100,7 @@ For the full list of options and defaults, see the `TxtViewConfig` rustdoc.
 | `Home` / `g`     | Jump to start        |
 | `End` / `G`      | Jump to end          |
 | Mouse wheel      | Scroll one line per tick |
+| Scrollbar track / thumb | Click to jump to a position, drag to scroll |
 
 ## Examples
 
@@ -112,6 +113,12 @@ cargo run --example view_file -- path/to/file.txt
 
 # Show the style gallery
 cargo run --example styled
+
+# Show control bytes and non-SGR escapes as visible caret notation
+cargo run --example control_chars
+
+# Show column-aware wrapping with CJK, emoji, and full-width punctuation
+cargo run --example visual_width
 ```
 
 ## Building from Source

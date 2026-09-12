@@ -19,9 +19,11 @@
 //!
 //! # Styled text
 //!
-//! The content is written verbatim, so ANSI colors and styling pass through
-//! unchanged. Build styled lines with crossterm's `style` module and feed
-//! them straight into [`TxtView::new`].
+//! ANSI colors and styling pass through unchanged: SGR codes and OSC8
+//! hyperlinks are preserved, and the active style is re-emitted compactly
+//! when a styled line wraps. Control bytes and other escape sequences are
+//! shown as visible caret notation. Build styled lines with crossterm's
+//! `style` module and feed them straight into [`TxtView::new`].
 //!
 //! # Configuration
 //!
