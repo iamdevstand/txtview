@@ -129,6 +129,29 @@ mod tests {
     use super::*;
 
     #[test]
+    fn csi_ending_in_multibyte_keeps_the_char() {
+        assert_eq!(wrap_line_ansi("\x1b[中", 20, 0), vec!["^[[中"]);
+        assert_eq!(wrap_line_ansi("\x1b[31中x", 20, 0), vec!["^[[31中x"]);
+    }
+
+    #[test]
+    fn adversarial_inputs_do_not_panic() {
+        let inputs = [
+            "\x1b[🎉",
+            "\x1b[中x",
+            "a\x1b[🎉b",
+            "🎉\x1b[🎉",
+            "\x1b\x1b[中",
+            "\x1b[3;🎉",
+            "\x1b[;中",
+            "\x1b[中\x1b[0m",
+        ];
+        for input in inputs {
+            let _ = wrap_line_ansi(input, 4, 0);
+        }
+    }
+
+    #[test]
     fn ansi_single_style_fits_one_row() {
         let line = "\x1b[31mhello\x1b[0m";
         let chunks = wrap_line_ansi(line, 10, 0);

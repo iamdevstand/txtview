@@ -43,10 +43,13 @@ pub(super) enum Esc {
 /// Parse an escape sequence starting at the `ESC` byte `start`.
 ///
 /// Returns the byte index just past the sequence and its classification. CSI
-/// consumes `ESC [` plus parameter / intermediate bytes and one final byte.
+/// consumes `ESC [` plus parameter / intermediate bytes and one final byte
+/// (0x40-0x7e); when the byte after the parameters is not a valid final byte
+/// the sequence stops before it, leaving that byte to be handled as text.
 /// OSC (`ESC ]`) consumes until a TERM (`BEL` or ST `ESC \`), everything else
 /// is a two-byte escape `ESC <byte>`. A lone `ESC` at the end of input is left
-/// unconsumed after itself.
+/// unconsumed after itself. The returned index always lands on a UTF-8 char
+/// boundary.
 pub(super) fn parse_escape(bytes: &[u8], start: usize) -> (usize, Esc) {
     let mut i = start + 1;
     if i >= bytes.len() {
@@ -59,7 +62,7 @@ pub(super) fn parse_escape(bytes: &[u8], start: usize) -> (usize, Esc) {
                 i += 1;
             }
             let is_sgr = i < bytes.len() && bytes[i] == b'm';
-            if i < bytes.len() {
+            if i < bytes.len() && (0x40..=0x7e).contains(&bytes[i]) {
                 i += 1;
             }
             (i, if is_sgr { Esc::Sgr } else { Esc::Visible })
