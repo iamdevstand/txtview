@@ -54,10 +54,10 @@ impl TxtView {
     /// | Mouse wheel       | Scroll one line per tick |
     /// | Scrollbar track/thumb | Click to jump to position, drag to scroll |
     pub fn run(&mut self) -> io::Result<()> {
-        if !io::stdin().is_terminal() || !io::stdout().is_terminal() {
+        if !io::stdout().is_terminal() {
             return Err(io::Error::new(
                 io::ErrorKind::NotConnected,
-                "txtview requires an interactive terminal: stdin and stdout must be a terminal",
+                "txtview requires an interactive terminal: stdout must be a terminal",
             ));
         }
 
