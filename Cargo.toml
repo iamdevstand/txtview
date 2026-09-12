@@ -12,4 +12,5 @@ exclude = [".vscode/", ".zed/"]
 
 [dependencies]
 crossterm = { version = "0.29", default-features = false, features = ["events", "windows"] }
+unicode-segmentation = "1.12"
 unicode-width = "0.2"

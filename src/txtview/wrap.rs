@@ -3,6 +3,7 @@
 
 use std::borrow::Cow;
 
+use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthChar;
 
 use super::ansi::{Esc, caret_notation, caret_width, escape_display, parse_escape};
@@ -15,6 +16,8 @@ use super::sgr::SgrState;
 /// the prefix.
 ///
 /// The wrapping preserves safe content verbatim and neutralizes the rest:
+/// - text is measured per grapheme cluster, so combining marks, skin-tone
+///   modifiers, ZWJ sequences and flag pairs never split across a wrap,
 /// - SGR (`ESC [...]m`) and OSC8 hyperlinks pass through raw (OSC8 emits as
 ///   one atomic unit so a wrap can never split it),
 /// - C0 controls, DEL, and every other escape become visible caret
@@ -62,21 +65,20 @@ pub(super) fn wrap_line_ansi(line: &str, width: usize, start_col: usize) -> Vec<
                 }
             }
         } else {
-            let ch_start = i;
-            i += 1;
-            while i < bytes.len() && (bytes[i] & 0xC0) == 0x80 {
-                i += 1;
-            }
-            let ch = &line[ch_start..i];
-            let c = ch.chars().next().unwrap_or('\u{fffd}');
+            // Process a full extended grapheme cluster together so a wrap can
+            // never split a base char from its combining marks, skin-tone
+            // modifiers, ZWJ sequences or flag pairs (issue #8).
+            let cluster = &line[i..].graphemes(true).next().unwrap_or_default();
+            let end = i + cluster.len();
+            let c = cluster.chars().next().unwrap_or('\u{fffd}');
             // Map the character to the text placed in the chunk, neutralizing
             // control bytes so they cannot corrupt the terminal:
             // - tab keeps its literal byte (wrapped at its 8-column stop),
             // - C0 controls and DEL become visible caret notation.
             let replacement: Cow<'_, str> = match c {
-                '\t' => Cow::Borrowed(ch),
+                '\t' => Cow::Borrowed(cluster),
                 c if c.is_control() => Cow::Owned(caret_notation(c)),
-                _ => Cow::Borrowed(ch),
+                _ => Cow::Borrowed(cluster),
             };
             let ch_width = match c {
                 '\t' => TAB_WIDTH - (start_col + visible_width) % TAB_WIDTH,
@@ -87,9 +89,12 @@ pub(super) fn wrap_line_ansi(line: &str, width: usize, start_col: usize) -> Vec<
                         1
                     }
                 }
-                _ => c.width().unwrap_or(1),
+                _ => cluster
+                    .chars()
+                    .map(|c| c.width().unwrap_or(1))
+                    .sum::<usize>(),
             };
-            (replacement, ch_width, i)
+            (replacement, ch_width, end)
         };
         i = next;
         if visible_width + piece_width > width && !current_chunk.is_empty() {
@@ -147,6 +152,19 @@ mod tests {
         for input in inputs {
             let _ = wrap_line_ansi(input, 4, 0);
         }
+    }
+
+    #[test]
+    fn grapheme_clusters_are_not_split() {
+        assert_eq!(
+            wrap_line_ansi("🎉🏽👍🇺🇸abc", 4, 0),
+            vec!["🎉🏽", "👍🇺🇸", "abc"]
+        );
+        assert_eq!(wrap_line_ansi("e\u{301}x", 1, 0), vec!["e\u{301}", "x"]);
+        assert_eq!(
+            wrap_line_ansi("x👨\u{200d}👩\u{200d}👧y", 4, 0),
+            vec!["x", "👨\u{200d}👩\u{200d}👧", "y"]
+        );
     }
 
     #[test]
