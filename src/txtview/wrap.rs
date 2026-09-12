@@ -6,6 +6,7 @@ use std::borrow::Cow;
 use unicode_width::UnicodeWidthChar;
 
 use super::ansi::{Esc, caret_notation, caret_width, escape_display, parse_escape};
+use super::sgr::SgrState;
 
 /// Wrap `line` into visual rows of at most `width` terminal columns.
 ///
@@ -26,7 +27,7 @@ pub(super) fn wrap_line_ansi(line: &str, width: usize, start_col: usize) -> Vec<
     let mut chunks = Vec::new();
     let mut current_chunk = String::new();
     let mut visible_width = 0;
-    let mut ansi_state = String::new();
+    let mut style = SgrState::default();
 
     let mut i = 0;
     while i < bytes.len() {
@@ -35,13 +36,9 @@ pub(super) fn wrap_line_ansi(line: &str, width: usize, start_col: usize) -> Vec<
             let seq = &line[i..end];
             match kind {
                 Esc::Sgr => {
-                    // SGR passes through raw so styling works, and is tracked
-                    // so it can be re-applied after a wrap.
-                    if seq == "\x1b[0m" {
-                        ansi_state.clear();
-                    } else {
-                        ansi_state.push_str(seq);
-                    }
+                    // SGR passes through raw so styling works and is folded
+                    // into the live state for re-emission after a wrap.
+                    style.apply(seq);
                     (Cow::Borrowed(seq), 0, end)
                 }
                 Esc::Osc8 => {
@@ -96,14 +93,15 @@ pub(super) fn wrap_line_ansi(line: &str, width: usize, start_col: usize) -> Vec<
         };
         i = next;
         if visible_width + piece_width > width && !current_chunk.is_empty() {
-            if !ansi_state.is_empty() {
+            let prefix = style.to_ansi();
+            if prefix.is_some() {
                 current_chunk.push_str("\x1b[0m");
             }
             chunks.push(current_chunk);
             current_chunk = String::new();
             visible_width = 0;
-            if !ansi_state.is_empty() {
-                current_chunk.push_str(&ansi_state);
+            if let Some(prefix) = prefix {
+                current_chunk.push_str(&prefix);
             }
         }
         current_chunk.push_str(&piece);
@@ -111,7 +109,7 @@ pub(super) fn wrap_line_ansi(line: &str, width: usize, start_col: usize) -> Vec<
     }
 
     if !current_chunk.is_empty() {
-        if !ansi_state.is_empty() {
+        if style.to_ansi().is_some() {
             current_chunk.push_str("\x1b[0m");
         }
         chunks.push(current_chunk);
@@ -179,6 +177,45 @@ mod tests {
         assert_eq!(chunks[0], "\x1b[31mabc\x1b[0m");
         assert_eq!(chunks[1], "def");
         assert_eq!(chunks[2], "ghi");
+    }
+
+    #[test]
+    fn empty_sgr_reset_clears_tracked_state() {
+        let chunks = wrap_line_ansi("\x1b[31mab\x1b[mcd\x1b[0m", 3, 0);
+        assert_eq!(chunks, vec!["\x1b[31mab\x1b[mc", "d\x1b[0m"]);
+    }
+
+    #[test]
+    fn attribute_off_removes_attribute_from_replay() {
+        let chunks = wrap_line_ansi("\x1b[1mbold\x1b[22mnormal", 4, 0);
+        assert_eq!(chunks, vec!["\x1b[1mbold\x1b[22m", "norm", "al"]);
+    }
+
+    #[test]
+    fn replayed_state_is_canonical_and_compact() {
+        let chunks = wrap_line_ansi("\x1b[1m\x1b[31mabcdef\x1b[0m", 3, 0);
+        assert_eq!(
+            chunks,
+            vec!["\x1b[1m\x1b[31mabc\x1b[0m", "\x1b[1;31mdef\x1b[0m"]
+        );
+    }
+
+    #[test]
+    fn extended_color_survives_replay() {
+        let chunks = wrap_line_ansi("\x1b[38;5;123mabcdef\x1b[0m", 3, 0);
+        assert_eq!(
+            chunks,
+            vec!["\x1b[38;5;123mabc\x1b[0m", "\x1b[38;5;123mdef\x1b[0m"]
+        );
+    }
+
+    #[test]
+    fn newer_foreground_replaces_older_in_replay() {
+        let chunks = wrap_line_ansi("\x1b[31m\x1b[32mabcdef\x1b[0m", 3, 0);
+        assert_eq!(
+            chunks,
+            vec!["\x1b[31m\x1b[32mabc\x1b[0m", "\x1b[32mdef\x1b[0m"]
+        );
     }
 
     #[test]

@@ -5,6 +5,7 @@ mod layout_tests;
 mod navigation;
 mod render;
 mod run;
+mod sgr;
 mod wrap;
 
 use crate::TxtViewConfig;
