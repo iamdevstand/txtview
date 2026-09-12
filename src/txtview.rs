@@ -1,7 +1,11 @@
+mod ansi;
 mod layout;
+#[cfg(test)]
+mod layout_tests;
 mod navigation;
 mod render;
 mod run;
+mod wrap;
 
 use crate::TxtViewConfig;
 
