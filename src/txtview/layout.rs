@@ -171,25 +171,38 @@ fn wrap_line_ansi(line: &str, width: usize, start_col: usize) -> Vec<String> {
 
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == 0x1b {
-            let seq_start = i;
-            i += 1;
-            if i < bytes.len() && bytes[i] == b'[' {
-                i += 1;
-                while i < bytes.len() && !bytes[i].is_ascii_alphabetic() {
-                    i += 1;
+        let (piece, piece_width, next): (Cow<'_, str>, usize, usize) = if bytes[i] == 0x1b {
+            let (end, kind) = parse_escape(bytes, i);
+            let seq = &line[i..end];
+            match kind {
+                Esc::Sgr => {
+                    // SGR passes through raw so styling works, and is tracked
+                    // so it can be re-applied after a wrap.
+                    if seq == "\x1b[0m" {
+                        ansi_state.clear();
+                    } else {
+                        ansi_state.push_str(seq);
+                    }
+                    (Cow::Borrowed(seq), 0, end)
                 }
-                if i < bytes.len() {
-                    i += 1;
+                Esc::Osc8 => {
+                    // OSC8 hyperlinks pass through raw so they render as real
+                    // links, emitted as one atomic unit (opener, payload and
+                    // terminator together) so a wrap can never split them.
+                    // OSC bytes take zero terminal columns, so no width.
+                    (Cow::Borrowed(seq), 0, end)
                 }
-            }
-            let seq = &line[seq_start..i];
-            current_chunk.push_str(seq);
-            if seq.ends_with('m') {
-                if seq == "\x1b[0m" {
-                    ansi_state.clear();
-                } else {
-                    ansi_state.push_str(seq);
+                Esc::Visible => {
+                    // Any other escape (OSC titles, cursor moves, clears, CSI,
+                    // 2-byte) is shown as visible caret notation, like `less`.
+                    // It is emitted as one atomic unit: never executed, never
+                    // split across a wrap boundary.
+                    let display = escape_display(seq);
+                    let width = display
+                        .chars()
+                        .map(|c| c.width().unwrap_or(1))
+                        .sum::<usize>();
+                    (Cow::Owned(display), width, end)
                 }
             }
         } else {
@@ -204,33 +217,38 @@ fn wrap_line_ansi(line: &str, width: usize, start_col: usize) -> Vec<String> {
             // control bytes so they cannot corrupt the terminal:
             // - tab keeps its literal byte (wrapped at its 8-column stop),
             // - C0 controls and DEL become visible caret notation.
-            // Escape sequences (`ESC ...`) are left untouched above.
-            let (replacement, ch_width): (Cow<'_, str>, usize) = match c {
-                '\t' => (
-                    Cow::Borrowed(ch),
-                    TAB_WIDTH - (start_col + visible_width) % TAB_WIDTH,
-                ),
-                c if c.is_control() => {
-                    let caret = caret_notation(c);
-                    let width = if caret_width(c) { 2 } else { 1 };
-                    (Cow::Owned(caret), width)
-                }
-                _ => (Cow::Borrowed(ch), c.width().unwrap_or(1)),
+            let replacement: Cow<'_, str> = match c {
+                '\t' => Cow::Borrowed(ch),
+                c if c.is_control() => Cow::Owned(caret_notation(c)),
+                _ => Cow::Borrowed(ch),
             };
-            if visible_width + ch_width > width && !current_chunk.is_empty() {
-                if !ansi_state.is_empty() {
-                    current_chunk.push_str("\x1b[0m");
+            let ch_width = match c {
+                '\t' => TAB_WIDTH - (start_col + visible_width) % TAB_WIDTH,
+                c if c.is_control() => {
+                    if caret_width(c) {
+                        2
+                    } else {
+                        1
+                    }
                 }
-                chunks.push(current_chunk);
-                current_chunk = String::new();
-                visible_width = 0;
-                if !ansi_state.is_empty() {
-                    current_chunk.push_str(&ansi_state);
-                }
+                _ => c.width().unwrap_or(1),
+            };
+            (replacement, ch_width, i)
+        };
+        i = next;
+        if visible_width + piece_width > width && !current_chunk.is_empty() {
+            if !ansi_state.is_empty() {
+                current_chunk.push_str("\x1b[0m");
             }
-            current_chunk.push_str(&replacement);
-            visible_width += ch_width;
+            chunks.push(current_chunk);
+            current_chunk = String::new();
+            visible_width = 0;
+            if !ansi_state.is_empty() {
+                current_chunk.push_str(&ansi_state);
+            }
         }
+        current_chunk.push_str(&piece);
+        visible_width += piece_width;
     }
 
     if !current_chunk.is_empty() {
@@ -270,6 +288,86 @@ fn caret_notation(c: char) -> String {
     } else {
         c.to_string()
     }
+}
+
+/// Classification of an escape sequence for [`wrap_line_ansi`].
+enum Esc {
+    /// SGR (`ESC [ ... m`), passes through raw for styling.
+    Sgr,
+    /// OSC8 hyperlink with a terminator (`ESC ] 8 ; ... BEL`/ST), passes
+    /// through raw so links stay live, kept as one atomic unit.
+    Osc8,
+    /// Anything else rendered as visible caret text.
+    Visible,
+}
+
+/// Parse an escape sequence starting at the `ESC` byte `start`.
+///
+/// Returns the byte index just past the sequence and its classification. CSI
+/// consumes `ESC [` plus parameter / intermediate bytes and one final byte.
+/// OSC (`ESC ]`) consumes until a TERM (`BEL` or ST `ESC \`), everything else
+/// is a two-byte escape `ESC <byte>`. A lone `ESC` at the end of input is left
+/// unconsumed after itself.
+fn parse_escape(bytes: &[u8], start: usize) -> (usize, Esc) {
+    let mut i = start + 1;
+    if i >= bytes.len() {
+        return (i, Esc::Visible);
+    }
+    match bytes[i] {
+        b'[' => {
+            i += 1;
+            while i < bytes.len() && (0x20..=0x3f).contains(&bytes[i]) {
+                i += 1;
+            }
+            let is_sgr = i < bytes.len() && bytes[i] == b'm';
+            if i < bytes.len() {
+                i += 1;
+            }
+            (i, if is_sgr { Esc::Sgr } else { Esc::Visible })
+        }
+        b']' => {
+            i += 1;
+            let osc8 = i + 1 < bytes.len() && bytes[i] == b'8' && bytes[i + 1] == b';';
+            let mut terminated = false;
+            while i < bytes.len() && bytes[i] != 0x07 && bytes[i] != 0x1b {
+                i += 1;
+            }
+            if i < bytes.len() && bytes[i] == 0x1b {
+                i += 1;
+                if i < bytes.len() && bytes[i] == b'\\' {
+                    i += 1;
+                    terminated = true;
+                }
+            } else if i < bytes.len() && bytes[i] == 0x07 {
+                i += 1;
+                terminated = true;
+            }
+            let kind = if osc8 && terminated {
+                Esc::Osc8
+            } else {
+                Esc::Visible
+            };
+            (i, kind)
+        }
+        b if (0x20..=0x7e).contains(&b) => (i + 1, Esc::Visible),
+        _ => (i, Esc::Visible),
+    }
+}
+
+/// Render a non-SGR escape sequence as visible text, like `less` does:
+/// `ESC` → `^[`, other control bytes → caret notation, everything else as-is.
+fn escape_display(seq: &str) -> String {
+    let mut out = String::new();
+    for c in seq.chars() {
+        if c == '\u{1b}' {
+            out.push_str("^[");
+        } else if caret_width(c) {
+            out.push_str(&caret_notation(c));
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -410,9 +508,74 @@ mod tests {
     }
 
     #[test]
-    fn escape_sequences_still_pass_through() {
+    fn sgr_passes_through_lone_control_becomes_caret() {
         let chunks = wrap_line_ansi("\x1b[1mhi\x07\x1b[0m", 20, 0);
         assert_eq!(chunks, vec!["\x1b[1mhi^G\x1b[0m"]);
+    }
+
+    #[test]
+    fn non_sgr_csi_is_visible_not_executed() {
+        assert_eq!(wrap_line_ansi("\x1b[2Aab", 20, 0), vec!["^[[2Aab"]);
+        assert_eq!(wrap_line_ansi("\x1b[2Jx", 20, 0), vec!["^[[2Jx"]);
+    }
+
+    #[test]
+    fn csi_with_non_alpha_final_byte_is_visible() {
+        assert_eq!(wrap_line_ansi("\x1b[2~ab", 20, 0), vec!["^[[2~ab"]);
+    }
+
+    #[test]
+    fn osc8_hyperlink_passes_through_whole() {
+        let chunks = wrap_line_ansi("\x1b]8;;https://x.dev\x07here", 8, 0);
+        assert_eq!(chunks, vec!["\x1b]8;;https://x.dev\x07here"]);
+    }
+
+    #[test]
+    fn osc8_never_split_across_wrap() {
+        let chunks = wrap_line_ansi("abcde\x1b]8;;u\x07fghij", 5, 0);
+        assert_eq!(chunks, vec!["abcde\x1b]8;;u\x07", "fghij"]);
+    }
+
+    #[test]
+    fn osc8_kept_with_styling_across_wrap() {
+        let chunks = wrap_line_ansi("\x1b[31mabc\x1b]8;;u\x07defgh", 5, 0);
+        assert_eq!(
+            chunks,
+            vec!["\x1b[31mabc\x1b]8;;u\x07de\x1b[0m", "\x1b[31mfgh\x1b[0m"]
+        );
+    }
+
+    #[test]
+    fn osc8_hyperlink_reset_link_passes_through() {
+        let chunks = wrap_line_ansi("\x1b]8;;u\x07go\x1b]8;;\x07", 40, 0);
+        assert_eq!(chunks, vec!["\x1b]8;;u\x07go\x1b]8;;\x07"]);
+    }
+
+    #[test]
+    fn unterminated_osc8_is_visible_not_raw() {
+        let chunks = wrap_line_ansi("\x1b]8;;https://x.dev", 40, 0);
+        assert_eq!(chunks, vec!["^[]8;;https://x.dev"]);
+    }
+
+    #[test]
+    fn non_osc8_osc_stays_visible() {
+        let chunks = wrap_line_ansi("\x1b]0;longtitle\x07body", 8, 0);
+        assert_eq!(chunks, vec!["^[]0;longtitle^G", "body"]);
+    }
+
+    #[test]
+    fn osc_terminated_by_st_is_visible() {
+        assert_eq!(
+            wrap_line_ansi("\x1b]0;hi\x1b\\x", 20, 0),
+            vec!["^[]0;hi^[\\x"]
+        );
+    }
+
+    #[test]
+    fn two_byte_and_lone_escapes_are_visible() {
+        assert_eq!(wrap_line_ansi("\x1b7abc", 20, 0), vec!["^[7abc"]);
+        assert_eq!(wrap_line_ansi("\x1bXab", 20, 0), vec!["^[Xab"]);
+        assert_eq!(wrap_line_ansi("\x1b", 20, 0), vec!["^["]);
     }
 
     #[test]
