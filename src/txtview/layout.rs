@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use crossterm::terminal;
 use unicode_width::UnicodeWidthChar;
 
@@ -197,10 +199,23 @@ fn wrap_line_ansi(line: &str, width: usize, start_col: usize) -> Vec<String> {
                 i += 1;
             }
             let ch = &line[ch_start..i];
-            let ch_width = match ch.chars().next() {
-                Some('\t') => TAB_WIDTH - (start_col + visible_width) % TAB_WIDTH,
-                Some(c) => c.width().unwrap_or(1),
-                None => 1,
+            let c = ch.chars().next().unwrap_or('\u{fffd}');
+            // Map the character to the text placed in the chunk, neutralizing
+            // control bytes so they cannot corrupt the terminal:
+            // - tab keeps its literal byte (wrapped at its 8-column stop),
+            // - C0 controls and DEL become visible caret notation.
+            // Escape sequences (`ESC ...`) are left untouched above.
+            let (replacement, ch_width): (Cow<'_, str>, usize) = match c {
+                '\t' => (
+                    Cow::Borrowed(ch),
+                    TAB_WIDTH - (start_col + visible_width) % TAB_WIDTH,
+                ),
+                c if c.is_control() => {
+                    let caret = caret_notation(c);
+                    let width = if caret_width(c) { 2 } else { 1 };
+                    (Cow::Owned(caret), width)
+                }
+                _ => (Cow::Borrowed(ch), c.width().unwrap_or(1)),
             };
             if visible_width + ch_width > width && !current_chunk.is_empty() {
                 if !ansi_state.is_empty() {
@@ -213,7 +228,7 @@ fn wrap_line_ansi(line: &str, width: usize, start_col: usize) -> Vec<String> {
                     current_chunk.push_str(&ansi_state);
                 }
             }
-            current_chunk.push_str(ch);
+            current_chunk.push_str(&replacement);
             visible_width += ch_width;
         }
     }
@@ -230,6 +245,31 @@ fn wrap_line_ansi(line: &str, width: usize, start_col: usize) -> Vec<String> {
     }
 
     chunks
+}
+
+/// Whether `c` is rendered as 2-column caret notation (`^X` / `^?`).
+///
+/// C0 controls (except tab and `ESC`, which are handled elsewhere) and DEL are
+/// escaped so they never reach the terminal as live control bytes.
+fn caret_width(c: char) -> bool {
+    let code = c as u32;
+    code <= 0x1f || code == 0x7f
+}
+
+/// Render a control character as its visible caret-notation equivalent.
+///
+/// C0 controls map to `^@`..=`^_` (e.g. BEL → `^G`, backspace → `^H`,
+/// CR → `^M`); DEL maps to `^?`. C1 controls are returned unchanged.
+fn caret_notation(c: char) -> String {
+    let code = c as u32;
+    if code <= 0x1f {
+        let letter = char::from_u32(code + 0x40).unwrap_or('?');
+        format!("^{letter}")
+    } else if code == 0x7f {
+        "^?".to_string()
+    } else {
+        c.to_string()
+    }
 }
 
 #[cfg(test)]
@@ -350,6 +390,29 @@ mod tests {
     fn tab_after_wide_char_counts_remaining_stop() {
         assert_eq!(wrap_line_ansi("中\tx", 10, 0), vec!["中\tx"]);
         assert_eq!(wrap_line_ansi("中\tx", 8, 0), vec!["中\t", "x"]);
+    }
+
+    #[test]
+    fn control_chars_become_caret_notation() {
+        let chunks = wrap_line_ansi("a\x07b\x08c\x7fd", 20, 0);
+        assert_eq!(chunks, vec!["a^Gb^Hc^?d"]);
+    }
+
+    #[test]
+    fn caret_notation_counts_two_columns() {
+        assert_eq!(wrap_line_ansi("ab\x07cd", 4, 0), vec!["ab^G", "cd"]);
+    }
+
+    #[test]
+    fn caret_notation_carries_ansi_state_across_wrap() {
+        let chunks = wrap_line_ansi("\x1b[31mab\x07cd\x1b[0m", 4, 0);
+        assert_eq!(chunks, vec!["\x1b[31mab^G\x1b[0m", "\x1b[31mcd\x1b[0m"]);
+    }
+
+    #[test]
+    fn escape_sequences_still_pass_through() {
+        let chunks = wrap_line_ansi("\x1b[1mhi\x07\x1b[0m", 20, 0);
+        assert_eq!(chunks, vec!["\x1b[1mhi^G\x1b[0m"]);
     }
 
     #[test]
