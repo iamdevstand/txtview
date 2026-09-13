@@ -65,7 +65,7 @@ fn display_carries_prefix_to_wrapped_rows() {
 }
 
 #[test]
-fn display_reserves_scrollbar_column() {
+fn display_reserves_no_scrollbar_column_when_fits() {
     let config = TxtViewConfig {
         show_help_bar: false,
         show_scrollbar: true,
@@ -74,7 +74,57 @@ fn display_reserves_scrollbar_column() {
         ..TxtViewConfig::default()
     };
     let v = TxtView::new("abcdef").with_config(config);
-    assert_eq!(v.display, vec!["abc", "def"]);
+    assert_eq!(v.display, vec!["abcd", "ef"]);
+    assert_eq!(v.max_offset, 0);
+}
+
+#[test]
+fn display_reserves_scrollbar_column_when_overflowing() {
+    let config = TxtViewConfig {
+        show_help_bar: false,
+        show_scrollbar: true,
+        viewport_width: Some(4),
+        viewport_height: Some(10),
+        ..TxtViewConfig::default()
+    };
+    let input = (0..11)
+        .map(|i| format!("line {i}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let v = TxtView::new(&input).with_config(config);
+    assert!(v.max_offset > 0, "must actually overflow");
+    assert!(
+        v.display.iter().all(|row| row.chars().count() <= 3),
+        "scrollbar column must be reserved on overflow: {:?}",
+        v.display
+    );
+}
+
+#[test]
+fn scrollbar_column_released_when_config_turned_off() {
+    let config = |show: bool| TxtViewConfig {
+        show_help_bar: false,
+        show_scrollbar: show,
+        viewport_width: Some(4),
+        viewport_height: Some(10),
+        ..TxtViewConfig::default()
+    };
+    let input = (0..11)
+        .map(|i| format!("line {i}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let v = TxtView::new(&input).with_config(config(true));
+    assert!(
+        v.display.iter().all(|row| row.chars().count() <= 3),
+        "scrollbar enabled + overflow must reserve: {:?}",
+        v.display
+    );
+    let v = v.with_config(config(false));
+    assert!(
+        v.display.iter().all(|row| row.chars().count() <= 4),
+        "scrollbar off must release the column: {:?}",
+        v.display
+    );
 }
 
 #[test]

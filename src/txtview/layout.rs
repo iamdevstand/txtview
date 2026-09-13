@@ -70,7 +70,11 @@ impl TxtView {
 
     fn layout_geometry(&self) -> (usize, usize) {
         let cols = self.layout_cols().max(1);
-        let scrollbar_width = if self.config.show_scrollbar { 1 } else { 0 };
+        let scrollbar_width = if self.config.show_scrollbar && self.scrollbar_active {
+            1
+        } else {
+            0
+        };
         let prefix_width = if self.config.show_line_numbers {
             self.lines.len().to_string().len() + 3
         } else {
@@ -83,14 +87,7 @@ impl TxtView {
         (avail, prefix_width)
     }
 
-    fn rebuild_display(&mut self) {
-        #[cfg(test)]
-        {
-            self.rebuild_count += 1;
-        }
-        let (avail, prefix_width) = self.layout_geometry();
-        self.display_geometry = Some((avail, prefix_width));
-
+    fn build_display(&self, avail: usize, prefix_width: usize) -> Vec<String> {
         let mut display = Vec::new();
 
         for (i, line) in self.lines.iter().enumerate() {
@@ -106,7 +103,24 @@ impl TxtView {
             }
         }
 
-        self.display = display;
+        display
+    }
+
+    fn rebuild_display(&mut self) {
+        #[cfg(test)]
+        {
+            self.rebuild_count += 1;
+        }
+        self.scrollbar_active = false;
+        let (avail, prefix_width) = self.layout_geometry();
+        self.display_geometry = Some((avail, prefix_width));
+        self.display = self.build_display(avail, prefix_width);
+        if self.config.show_scrollbar && self.display.len() > usize::from(self.visible_rows()) {
+            self.scrollbar_active = true;
+            let (avail, prefix_width) = self.layout_geometry();
+            self.display_geometry = Some((avail, prefix_width));
+            self.display = self.build_display(avail, prefix_width);
+        }
     }
 
     fn line_prefix(&self, line_index: usize, chunk_index: usize) -> String {
@@ -123,7 +137,10 @@ impl TxtView {
     }
 
     pub(super) fn refresh_bounds(&mut self) {
-        if self.display_geometry != Some(self.layout_geometry()) {
+        let needs_enable = self.config.show_scrollbar
+            && !self.scrollbar_active
+            && self.display.len() > usize::from(self.visible_rows());
+        if needs_enable || self.display_geometry != Some(self.layout_geometry()) {
             self.rebuild_display();
         }
         let vr = usize::from(self.visible_rows());
