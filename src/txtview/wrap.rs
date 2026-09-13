@@ -89,10 +89,7 @@ pub(super) fn wrap_line_ansi(line: &str, width: usize, start_col: usize) -> Vec<
                         1
                     }
                 }
-                _ => cluster
-                    .chars()
-                    .map(|c| c.width().unwrap_or(1))
-                    .sum::<usize>(),
+                _ => cluster_visual_width(cluster),
             };
             (replacement, ch_width, end)
         };
@@ -125,6 +122,22 @@ pub(super) fn wrap_line_ansi(line: &str, width: usize, start_col: usize) -> Vec<
     }
 
     chunks
+}
+
+/// Visual width of a grapheme cluster. Emoji-presentation sequences carry the
+/// U+FE0F variation selector (e.g. ❤️, ©️) or a U+20E3 keycap (e.g. #️⃣, 1️⃣)
+/// for rendering at double width in modern terminals; `unicode-width` keeps
+/// the base char's text width, so bump those clusters to two columns.
+fn cluster_visual_width(cluster: &str) -> usize {
+    let width = cluster
+        .chars()
+        .map(|c| c.width().unwrap_or(1))
+        .sum::<usize>();
+    if cluster.contains('\u{fe0f}') || cluster.contains('\u{20e3}') {
+        width.max(2)
+    } else {
+        width
+    }
 }
 
 #[cfg(test)]
@@ -165,6 +178,24 @@ mod tests {
             wrap_line_ansi("x👨\u{200d}👩\u{200d}👧y", 4, 0),
             vec!["x", "👨\u{200d}👩\u{200d}👧", "y"]
         );
+    }
+
+    #[test]
+    fn keycap_sequence_counts_two_columns() {
+        let chunks = wrap_line_ansi("#\u{fe0f}\u{20e3}x", 2, 0);
+        assert_eq!(chunks, vec!["#\u{fe0f}\u{20e3}", "x"]);
+    }
+
+    #[test]
+    fn vs16_emoji_counts_two_columns() {
+        let chunks = wrap_line_ansi("❤\u{fe0f}x", 2, 0);
+        assert_eq!(chunks, vec!["❤\u{fe0f}", "x"]);
+    }
+
+    #[test]
+    fn vs15_emoji_keeps_text_width() {
+        let chunks = wrap_line_ansi("❤\u{fe0e}x", 2, 0);
+        assert_eq!(chunks, vec!["❤\u{fe0e}x"]);
     }
 
     #[test]
