@@ -161,7 +161,7 @@ impl TxtView {
         }
     }
 
-    /// The thumb geometry for a scrollbar spanning `visible` cells along its
+    /// The thumb geometry for a scrollbar spanning the content rows along its
     /// axis.
     ///
     /// The thumb is capped so it always keeps
@@ -180,7 +180,8 @@ impl TxtView {
     /// guard is belt-and-braces against a transiently inconsistent frame: it
     /// returns `None`, and `compose` then draws no bar for one frame instead
     /// of faulting.
-    pub(super) fn scroll_geometry(&self, visible: usize) -> Option<ScrollGeometry> {
+    pub(super) fn scroll_geometry(&self) -> Option<ScrollGeometry> {
+        let visible = usize::from(self.visible_rows());
         if !self.scrollbar_active || visible == 0 {
             return None;
         }

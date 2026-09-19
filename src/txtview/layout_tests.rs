@@ -249,9 +249,8 @@ fn display_keeps_ansi_codes_intact() {
 fn scrollbar_skipped_when_everything_fits() {
     let v = scrolling_viewer(5);
     assert_eq!(v.max_offset, 0);
-    let visible = usize::from(v.visible_rows());
     assert!(
-        v.scroll_geometry(visible).is_none(),
+        v.scroll_geometry().is_none(),
         "no geometry must be produced when everything fits"
     );
 }
@@ -259,8 +258,7 @@ fn scrollbar_skipped_when_everything_fits() {
 #[test]
 fn offset_from_thumb_top_is_monotonic_and_bounded() {
     let v = scrolling_viewer(100);
-    let visible = usize::from(v.visible_rows());
-    let g = v.scroll_geometry(visible).expect("scrollbar present");
+    let g = v.scroll_geometry().expect("scrollbar present");
     let travel = i64::try_from(g.visible - g.size).unwrap_or(i64::MAX);
 
     assert_eq!(g.offset_from_thumb_top(-5, v.max_offset), 0);
@@ -280,12 +278,12 @@ fn offset_from_thumb_top_is_monotonic_and_bounded() {
 fn dragging_keeps_thumb_on_mouse() {
     let mut v = scrolling_viewer(100);
     let visible = v.visible_rows() as usize;
-    let g = v.scroll_geometry(visible).unwrap();
+    let g = v.scroll_geometry().unwrap();
 
     for mouse_y in 0..u16::try_from(visible).unwrap_or(0) {
         let off = g.offset_from_thumb_top(i64::from(mouse_y), v.max_offset);
         v.offset = off;
-        let moved = v.scroll_geometry(visible).unwrap();
+        let moved = v.scroll_geometry().unwrap();
         let travel = g.visible - g.size;
         let desired = usize::from(mouse_y).clamp(0, travel);
         assert_eq!(
@@ -300,7 +298,7 @@ fn dragging_keeps_thumb_on_mouse() {
 fn non_divisible_geometry_keeps_thumb_bounded_and_near_mouse() {
     let mut v = scrolling_viewer(15);
     let visible = v.visible_rows() as usize;
-    let g = v.scroll_geometry(visible).expect("scrollbar present");
+    let g = v.scroll_geometry().expect("scrollbar present");
     let travel = g.visible - g.size;
     assert!(
         v.max_offset % travel.max(1) != 0,
@@ -311,7 +309,7 @@ fn non_divisible_geometry_keeps_thumb_bounded_and_near_mouse() {
     for mouse_y in 0..u16::try_from(visible).unwrap_or(0) {
         let off = g.offset_from_thumb_top(i64::from(mouse_y), v.max_offset);
         v.offset = off;
-        let moved = v.scroll_geometry(visible).unwrap();
+        let moved = v.scroll_geometry().unwrap();
         let desired = usize::from(mouse_y).clamp(0, travel);
         assert!(
             moved.top.abs_diff(desired) <= 1,
@@ -351,7 +349,7 @@ fn scrollbar_hidden_when_track_cannot_host_thumb_and_travel() {
             "a {height}-row viewport cannot host a thumb plus travel"
         );
         assert!(
-            v.scroll_geometry(usize::from(v.visible_rows())).is_none(),
+            v.scroll_geometry().is_none(),
             "no geometry for a {height}-row viewport"
         );
     }
@@ -368,7 +366,7 @@ fn thumb_capped_so_a_bare_overflow_keeps_travel_room() {
     };
     let v = TxtView::new(&scratch_lines(11)).with_config(config.clone());
     let geometry = v
-        .scroll_geometry(usize::from(v.visible_rows()))
+        .scroll_geometry()
         .expect("11 rows over 10 must stay usable");
     assert_eq!(
         geometry.visible - geometry.size,
@@ -378,7 +376,7 @@ fn thumb_capped_so_a_bare_overflow_keeps_travel_room() {
 
     let v = TxtView::new(&scratch_lines(100)).with_config(config);
     let geometry = v
-        .scroll_geometry(usize::from(v.visible_rows()))
+        .scroll_geometry()
         .expect("a tall document must keep the smallest thumb");
     assert_eq!(
         geometry.size, 1,

@@ -33,14 +33,13 @@ impl TxtView {
     /// so the composed canvas always agrees with what is on screen.
     pub(super) fn compose(&self) -> Canvas<'_> {
         let cols = self.content_cols();
-        let content_rows = self.visible_rows();
         let viewport_rows = self.resolved_height();
 
         let mut canvas = Canvas::new(cols, viewport_rows);
         if self.config.show_help_bar {
             canvas.place(HelpBar::new(Self::help_text()));
         }
-        if let Some(geometry) = self.scroll_geometry(usize::from(content_rows)) {
+        if let Some(geometry) = self.scroll_geometry() {
             canvas.place(ScrollBar::new(
                 geometry,
                 Orientation::Vertical,
