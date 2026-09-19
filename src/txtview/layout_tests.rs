@@ -20,6 +20,20 @@ fn viewer(input: &str, width: u16) -> TxtView {
     TxtView::new(input).with_config(config)
 }
 
+fn scrolling_viewer(n: usize) -> TxtView {
+    let text = (0..n)
+        .map(|i| format!("line {i}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let config = TxtViewConfig {
+        viewport_height: Some(10),
+        viewport_width: Some(80),
+        show_help_bar: false,
+        ..TxtViewConfig::default()
+    };
+    TxtView::new(&text).with_config(config)
+}
+
 const LINE_NUMBERS: TxtViewConfig = TxtViewConfig {
     show_help_bar: false,
     show_scrollbar: false,
@@ -229,4 +243,138 @@ fn display_counts_wide_chars_by_visual_width() {
 fn display_keeps_ansi_codes_intact() {
     let v = viewer("\x1b[31m12345\x1b[0m", 3);
     assert_eq!(v.display, vec!["\x1b[31m123\x1b[0m", "\x1b[31m45\x1b[0m"]);
+}
+
+#[test]
+fn scrollbar_skipped_when_everything_fits() {
+    let v = scrolling_viewer(5);
+    assert_eq!(v.max_offset, 0);
+    let visible = usize::from(v.visible_rows());
+    assert!(
+        v.scroll_geometry(visible).is_none(),
+        "no geometry must be produced when everything fits"
+    );
+}
+
+#[test]
+fn offset_from_thumb_top_is_monotonic_and_bounded() {
+    let v = scrolling_viewer(100);
+    let visible = usize::from(v.visible_rows());
+    let g = v.scroll_geometry(visible).expect("scrollbar present");
+    let travel = i64::try_from(g.visible - g.size).unwrap_or(i64::MAX);
+
+    assert_eq!(g.offset_from_thumb_top(-5, v.max_offset), 0);
+    assert_eq!(g.offset_from_thumb_top(0, v.max_offset), 0);
+    assert_eq!(g.offset_from_thumb_top(travel, v.max_offset), v.max_offset);
+
+    let mut prev = 0;
+    for top in 0..=travel {
+        let off = g.offset_from_thumb_top(top, v.max_offset);
+        assert!(off >= prev, "not monotonic at top={top}");
+        assert!(off <= v.max_offset, "exceeds max_offset at top={top}");
+        prev = off;
+    }
+}
+
+#[test]
+fn dragging_keeps_thumb_on_mouse() {
+    let mut v = scrolling_viewer(100);
+    let visible = v.visible_rows() as usize;
+    let g = v.scroll_geometry(visible).unwrap();
+
+    for mouse_y in 0..u16::try_from(visible).unwrap_or(u16::MAX) {
+        let off = g.offset_from_thumb_top(i64::from(mouse_y), v.max_offset);
+        v.offset = off;
+        let moved = v.scroll_geometry(visible).unwrap();
+        let travel = g.visible - g.size;
+        let desired = usize::from(mouse_y).clamp(0, travel);
+        assert_eq!(
+            moved.top, desired,
+            "thumb at {} dragged to {} for y={}",
+            moved.top, desired, mouse_y
+        );
+    }
+}
+
+#[test]
+fn non_divisible_geometry_keeps_thumb_bounded_and_near_mouse() {
+    let mut v = scrolling_viewer(15);
+    let visible = v.visible_rows() as usize;
+    let g = v.scroll_geometry(visible).expect("scrollbar present");
+    let travel = g.visible - g.size;
+    assert!(
+        v.max_offset % travel.max(1) != 0,
+        "the fixture must produce non-divisible geometry"
+    );
+
+    let mut prev = 0;
+    for mouse_y in 0..u16::try_from(visible).unwrap_or(u16::MAX) {
+        let off = g.offset_from_thumb_top(i64::from(mouse_y), v.max_offset);
+        v.offset = off;
+        let moved = v.scroll_geometry(visible).unwrap();
+        let desired = usize::from(mouse_y).clamp(0, travel);
+        assert!(
+            moved.top.abs_diff(desired) <= 1,
+            "page-flip drifts: thumb at {} dragged to {} for y={}",
+            moved.top,
+            desired,
+            mouse_y
+        );
+        assert!(
+            moved.top >= prev,
+            "not monotonic at y={mouse_y}: {} then {}",
+            prev,
+            moved.top
+        );
+        assert!(
+            moved.top <= travel,
+            "thumb escaped the track at y={mouse_y}: {}",
+            moved.top
+        );
+        prev = moved.top;
+    }
+}
+
+#[test]
+fn scrollbar_column_released_when_height_makes_content_fit() {
+    let input = (0..11)
+        .map(|i| format!("{i:04}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let tall = TxtViewConfig {
+        show_help_bar: false,
+        show_scrollbar: true,
+        viewport_width: Some(4),
+        viewport_height: Some(10),
+        ..TxtViewConfig::default()
+    };
+    let mut v = TxtView::new(&input).with_config(tall.clone());
+    assert!(v.scrollbar_active, "11 rows must overflow 10");
+    assert!(
+        v.display.iter().all(|row| row.chars().count() <= 3),
+        "the scrollbar column must be reserved while it overflows: {:?}",
+        v.display
+    );
+
+    let short = TxtViewConfig {
+        viewport_height: Some(40),
+        ..tall
+    };
+    v = v.with_config(short);
+    v.refresh_bounds();
+    assert!(
+        !v.scrollbar_active,
+        "once the content fits, the bar must go"
+    );
+    assert_eq!(v.max_offset, 0);
+    assert_eq!(
+        v.display.len(),
+        11,
+        "the freed column must stop the wrapping"
+    );
+    assert!(
+        v.display.iter().all(|row| row.chars().count() <= 4),
+        "the freed column must be released: {:?}",
+        v.display
+    );
 }

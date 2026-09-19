@@ -32,6 +32,9 @@
 //! literal plus `..TxtViewConfig::default()`, or chain the `with_*` setters.
 //! See its documentation for examples.
 
+mod components;
+mod surface;
+mod text;
 mod txtview;
 mod txtview_config;
 

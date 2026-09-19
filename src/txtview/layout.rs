@@ -4,24 +4,23 @@
 use crossterm::terminal;
 
 use super::TxtView;
-use super::wrap::wrap_line_ansi;
-
-pub(super) struct ScrollGeometry {
-    pub column: u16,
-    pub top: usize,
-    pub size: usize,
-    pub visible: usize,
-}
+use crate::components::HelpBar;
+use crate::components::scrollbar::ScrollGeometry;
+use crate::text::wrap_line_ansi;
 
 impl TxtView {
     pub(super) fn term_size() -> (u16, u16) {
         terminal::size().unwrap_or((80, 24))
     }
 
+    /// The viewport width, clamped to the terminal the way the height is, so
+    /// a configured width wider than the terminal cannot push writes past its
+    /// edge.
     fn resolved_width(&self) -> usize {
+        let cols = usize::from(Self::term_size().0);
         match self.config.viewport_width {
-            Some(w) => usize::from(w),
-            None => usize::from(Self::term_size().0),
+            Some(w) => usize::from(w).min(cols),
+            None => cols,
         }
     }
 
@@ -33,10 +32,6 @@ impl TxtView {
         }
     }
 
-    pub(super) fn help_wrap_cols(&self) -> usize {
-        self.resolved_width().max(1)
-    }
-
     pub(super) fn help_text() -> String {
         "q: quit | ↑/↓, j/k, Mouse: scroll | PgUp/PgDn: page | Home/End, g/G: start/end".to_string()
     }
@@ -45,31 +40,24 @@ impl TxtView {
         if !self.config.show_help_bar {
             return 0;
         }
-        let total = usize::from(self.resolved_height());
-        if total < 2 {
-            return 0;
-        }
-        let lines = Self::help_text()
-            .chars()
-            .count()
-            .div_ceil(self.help_wrap_cols())
-            .max(1)
-            .min(total - 2);
-        1 + lines
+        HelpBar::new(Self::help_text()).height(self.resolved_width(), self.resolved_height())
     }
 
+    /// The columns the viewport spans: the resolved width, before the
+    /// scrollbar column is carved out of the content's text.
+    pub(super) fn content_cols(&self) -> u16 {
+        u16::try_from(self.resolved_width()).unwrap_or(u16::MAX)
+    }
+
+    /// The rows the content owns once the help bar takes its footprint.
     pub(super) fn visible_rows(&self) -> u16 {
         self.resolved_height()
             .saturating_sub(u16::try_from(self.help_height()).unwrap_or(u16::MAX))
             .max(1)
     }
 
-    fn layout_cols(&self) -> usize {
-        self.resolved_width()
-    }
-
     fn layout_geometry(&self) -> (usize, usize) {
-        let cols = self.layout_cols().max(1);
+        let cols = usize::from(self.content_cols().max(1));
         let scrollbar_width = if self.config.show_scrollbar && self.scrollbar_active {
             1
         } else {
@@ -137,10 +125,11 @@ impl TxtView {
     }
 
     pub(super) fn refresh_bounds(&mut self) {
-        let needs_enable = self.config.show_scrollbar
-            && !self.scrollbar_active
-            && self.display.len() > usize::from(self.visible_rows());
-        if needs_enable || self.display_geometry != Some(self.layout_geometry()) {
+        let overflows =
+            self.config.show_scrollbar && self.display.len() > usize::from(self.visible_rows());
+        if overflows != self.scrollbar_active
+            || self.display_geometry != Some(self.layout_geometry())
+        {
             self.rebuild_display();
         }
         let vr = usize::from(self.visible_rows());
@@ -154,26 +143,32 @@ impl TxtView {
         }
     }
 
+    /// The thumb geometry for a scrollbar spanning `visible` cells along its
+    /// axis.
+    ///
+    /// Whether a bar exists is decided by `scrollbar_active` alone: the
+    /// scrollbar is composed exactly when the flag is set, and
+    /// [`TxtView::refresh_bounds`] keeps the flag equal to "the document
+    /// overflows the viewport", so the two-pass layout and the canvas can
+    /// never disagree about the bar's presence. The guard is belt-and-braces
+    /// against a transiently inconsistent frame: it returns `None`, and
+    /// `compose` then draws no bar for one frame instead of faulting.
     pub(super) fn scroll_geometry(&self, visible: usize) -> Option<ScrollGeometry> {
-        if !self.config.show_scrollbar || self.max_offset == 0 || visible == 0 {
+        if !self.scrollbar_active || visible == 0 {
             return None;
         }
+        debug_assert!(
+            self.max_offset > 0,
+            "a reserved bar must have a scroll range"
+        );
+        let travel = self.max_offset.max(1);
         let total = self.display.len().max(1);
         let thumb = (visible * visible / total).max(1).min(visible);
-        let top = (self.offset * (visible - thumb) / self.max_offset).min(visible - thumb);
+        let top = (self.offset.saturating_mul(visible - thumb) / travel).min(visible - thumb);
         Some(ScrollGeometry {
-            column: u16::try_from(self.help_wrap_cols().saturating_sub(1)).unwrap_or(u16::MAX),
             top,
             size: thumb,
             visible,
         })
-    }
-
-    /// Map a thumb-top row (0..visible) to a scroll offset using the same
-    /// proportion that [`TxtView::scroll_geometry`] uses in reverse.
-    pub(super) fn offset_from_thumb_top(&self, top: i64, g: &ScrollGeometry) -> usize {
-        let travel = g.visible.saturating_sub(g.size).max(1);
-        let clamped = usize::try_from(top).unwrap_or(0).min(travel);
-        clamped.saturating_mul(self.max_offset) / travel
     }
 }

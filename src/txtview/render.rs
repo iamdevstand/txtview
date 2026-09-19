@@ -1,144 +1,103 @@
 use std::io;
 
-use crossterm::{
-    cursor::MoveTo,
-    queue,
-    terminal::{Clear, ClearType},
-};
-
 use super::TxtView;
+use crate::components::{Content, HelpBar, Orientation, ScrollBar};
+use crate::surface::Canvas;
 
 impl TxtView {
+    /// Compose the viewer's pieces into a canvas and paint it.
+    ///
+    /// This is the junction point every redraw goes through. The full terminal
+    /// box (config-overridable) is the [`Canvas`], the pieces live in it and
+    /// it is what gets drawn. Each piece works out its own area inside the
+    /// space that is still free. [`HelpBar`] anchors its wrapped text to the
+    /// bottom edge, [`ScrollBar`] claims the rightmost column, and [`Content`]
+    /// fills whatever remains. A piece with nothing to show vanishes without
+    /// taking space. Once every piece is placed the canvas draws them in the
+    /// order they were added. The same canvas also answers mouse presses, so
+    /// the scrollbar behaves like the piece it is instead of being bolted on.
     pub(super) fn draw(&mut self, stdout: &mut impl io::Write) -> io::Result<()> {
-        let rows = self.resolved_height();
         self.refresh_bounds();
-
-        let visible = usize::from(self.visible_rows());
-
-        self.render_rows(stdout, 0..visible)?;
-        self.render_scrollbar(stdout, visible)?;
-
-        self.render_help_bar(stdout, rows)?;
-
+        self.compose().render(stdout)?;
         stdout.flush()?;
         Ok(())
     }
 
-    fn render_rows(
-        &mut self,
-        stdout: &mut impl io::Write,
-        range: std::ops::Range<usize>,
-    ) -> io::Result<()> {
-        for i in range {
-            let text = self
-                .display
-                .get(self.offset + i)
-                .map(String::as_str)
-                .unwrap_or("");
-            queue!(
-                stdout,
-                MoveTo(0, u16::try_from(i).unwrap_or(u16::MAX)),
-                Clear(ClearType::CurrentLine)
-            )?;
-            write!(stdout, "{}", text)?;
+    /// Rebuild the current frame's [`Canvas`] from the viewer's last-drawn
+    /// state.
+    ///
+    /// This must follow a [`TxtView::draw`]: composing alone does not refresh
+    /// the display bounds, so the canvas it builds describes the state after
+    /// the most recent draw. The mouse handlers recompose between events,
+    /// when no layout-affecting change can have happened since the last draw,
+    /// so the composed canvas always agrees with what is on screen.
+    pub(super) fn compose(&self) -> Canvas<'_> {
+        let cols = self.content_cols();
+        let content_rows = self.visible_rows();
+        let viewport_rows = self.resolved_height();
+
+        let mut canvas = Canvas::new(cols, viewport_rows);
+        if self.config.show_help_bar {
+            canvas.place(HelpBar::new(Self::help_text()));
         }
-        Ok(())
+        if let Some(geometry) = self.scroll_geometry(usize::from(content_rows)) {
+            canvas.place(ScrollBar::new(
+                geometry,
+                Orientation::Vertical,
+                self.drag_grab_offset,
+            ));
+        }
+        canvas.fill(Content::new(&self.display, self.offset));
+
+        canvas
     }
-
-    fn render_scrollbar(&mut self, stdout: &mut impl io::Write, visible: usize) -> io::Result<()> {
-        let Some(g) = self.scroll_geometry(visible) else {
-            return Ok(());
-        };
-        for i in 0..g.visible {
-            let ch = if i >= g.top && i < g.top + g.size {
-                if self.dragging { '▓' } else { '█' }
-            } else {
-                '░'
-            };
-            queue!(
-                stdout,
-                MoveTo(g.column, u16::try_from(i).unwrap_or(u16::MAX))
-            )?;
-            write!(stdout, "{}", ch)?;
-        }
-        Ok(())
-    }
-
-    fn render_help_bar(&mut self, stdout: &mut impl io::Write, rows: u16) -> io::Result<()> {
-        if !self.config.show_help_bar {
-            return Ok(());
-        }
-
-        let total = usize::from(rows);
-        if total < 2 {
-            return Ok(());
-        }
-
-        let cols = self.help_wrap_cols();
-        let lines = wrap_lines(&Self::help_text(), cols);
-        let shown = lines.len().min(total - 2);
-        let base = total - 1 - shown;
-
-        queue!(
-            stdout,
-            MoveTo(0, u16::try_from(base).unwrap_or(u16::MAX)),
-            Clear(ClearType::CurrentLine)
-        )?;
-        write!(stdout, "{}", "─".repeat(cols))?;
-
-        for (i, line) in lines.iter().take(shown).enumerate() {
-            queue!(
-                stdout,
-                MoveTo(0, u16::try_from(base + 1 + i).unwrap_or(u16::MAX)),
-                Clear(ClearType::CurrentLine)
-            )?;
-            write!(stdout, "{}", line)?;
-        }
-
-        Ok(())
-    }
-}
-
-fn wrap_lines(s: &str, width: usize) -> Vec<String> {
-    let width = width.max(1);
-    let chars: Vec<char> = s.chars().collect();
-    if chars.is_empty() {
-        return vec![String::new()];
-    }
-    chars
-        .chunks(width)
-        .map(|chunk| chunk.iter().collect())
-        .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::TxtViewConfig;
+    use crate::surface::{Area, Gesture};
 
-    fn viewer(n: usize) -> TxtView {
-        let text = (0..n)
+    fn max_move_to_row(out: &[u8]) -> usize {
+        parse_moves(out)
+            .into_iter()
+            .map(|(row, _)| usize::from(row))
+            .max()
+            .unwrap_or(0)
+    }
+
+    fn max_move_to_col(out: &[u8]) -> usize {
+        parse_moves(out)
+            .into_iter()
+            .map(|(_, col)| usize::from(col))
+            .max()
+            .unwrap_or(0)
+    }
+
+    /// The 1-based `(row, col)` of every `MoveTo` escape in the output.
+    fn parse_moves(out: &[u8]) -> Vec<(u16, u16)> {
+        String::from_utf8_lossy(out)
+            .split("\x1b[")
+            .filter_map(|m| {
+                let rest = m.strip_suffix('H')?;
+                let (row, col) = rest.split_once(';')?;
+                Some((row.parse().ok()?, col.parse().ok()?))
+            })
+            .collect()
+    }
+
+    fn scrolling_viewer(lines: usize, rows: u16, cols: u16) -> TxtView {
+        let text = (0..lines)
             .map(|i| format!("line {i}"))
             .collect::<Vec<_>>()
             .join("\n");
         let config = TxtViewConfig {
-            viewport_height: Some(10),
-            viewport_width: Some(80),
-            show_help_bar: false,
+            viewport_height: Some(rows),
+            viewport_width: Some(cols),
             ..TxtViewConfig::default()
         };
         TxtView::new(&text).with_config(config)
-    }
-
-    fn max_move_to_row(out: &[u8]) -> usize {
-        let s = String::from_utf8_lossy(out);
-        s.split("\x1b[")
-            .filter_map(|m| {
-                let rest = m.strip_suffix('H')?;
-                rest.split_once(';')?.0.parse::<usize>().ok()
-            })
-            .max()
-            .unwrap_or(0)
     }
 
     #[test]
@@ -149,16 +108,16 @@ mod tests {
             .join("\n");
         let config = TxtViewConfig {
             viewport_height: Some(80),
-            viewport_width: Some(80),
+            viewport_width: Some(5000),
             show_help_bar: true,
             show_scrollbar: false,
             ..TxtViewConfig::default()
         };
         let mut v = TxtView::new(&text).with_config(config);
 
-        let rows = usize::from(TxtView::term_size().1);
+        let (cols, rows) = TxtView::term_size();
         assert!(
-            usize::from(v.visible_rows()) <= rows,
+            usize::from(v.visible_rows()) <= usize::from(rows),
             "viewport {} exceeds terminal height {rows}",
             v.visible_rows()
         );
@@ -166,8 +125,12 @@ mod tests {
         let mut out = Vec::new();
         v.draw(&mut out).unwrap();
         assert!(
-            max_move_to_row(&out) <= rows,
+            max_move_to_row(&out) <= usize::from(rows),
             "draw wrote past terminal height {rows}: {out:?}"
+        );
+        assert!(
+            max_move_to_col(&out) <= usize::from(cols),
+            "draw wrote past terminal width {cols}: {out:?}"
         );
     }
 
@@ -191,84 +154,199 @@ mod tests {
     }
 
     #[test]
-    fn help_bar_renders_on_narrow_terminal() {
+    fn draw_renders_scrollbar_glyphs() {
+        let text = (0..500)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
         let config = TxtViewConfig {
-            show_help_bar: true,
-            show_scrollbar: false,
-            viewport_height: Some(10),
-            viewport_width: Some(1),
+            viewport_height: Some(20),
+            viewport_width: Some(40),
+            show_help_bar: false,
+            show_scrollbar: true,
             ..TxtViewConfig::default()
         };
-        let mut v = TxtView::new("a\nb\nc").with_config(config);
+        let mut v = TxtView::new(&text).with_config(config);
+
         let mut out = Vec::new();
-        v.render_help_bar(&mut out, v.resolved_height()).unwrap();
-        assert!(!out.is_empty(), "help bar must render on a narrow terminal");
+        v.draw(&mut out).unwrap();
+        let s = String::from_utf8_lossy(&out);
         assert!(
-            max_move_to_row(&out) <= 10,
-            "help bar escaped the 10-row viewport: {out:?}"
+            s.contains(['█', '░', '▓']),
+            "the scrollbar column paints its thumb and track glyphs: {s:?}"
         );
     }
 
     #[test]
-    fn scrollbar_emits_thumb_blocks() {
-        let mut v = viewer(25);
-        assert!(v.max_offset > 0);
-        let mut out = Vec::new();
-        v.render_scrollbar(&mut out, usize::from(v.visible_rows()))
-            .unwrap();
-        let s = String::from_utf8(out).unwrap();
-        assert!(s.contains('█'), "expected a thumb in output: {s:?}");
+    fn compose_scrollbar_area_matches_the_content_rows() {
+        let v = scrolling_viewer(100, 20, 40);
+        let canvas = v.compose();
+        let content_rows = v.visible_rows();
+        let viewport_rows = v.resolved_height();
+
+        let areas = canvas.areas();
+        assert_eq!(
+            areas
+                .iter()
+                .find(|area| area.width == 1 && area.col == 39)
+                .copied(),
+            Some(Area {
+                col: 39,
+                row: 0,
+                width: 1,
+                height: content_rows,
+            }),
+            "the scrollbar grant must be exactly the region it paints"
+        );
+        assert_eq!(
+            areas.iter().find(|area| area.row == content_rows).copied(),
+            Some(Area {
+                col: 0,
+                row: content_rows,
+                width: 40,
+                height: viewport_rows - content_rows,
+            }),
+            "the help bar must own the rows below the content"
+        );
+        assert_eq!(
+            areas.iter().max_by_key(|area| area.height).copied(),
+            Some(Area {
+                col: 0,
+                row: 0,
+                width: 39,
+                height: content_rows,
+            }),
+            "content must cover the box minus the help bar and scrollbar"
+        );
     }
 
     #[test]
-    fn scrollbar_skipped_when_everything_fits() {
-        let mut v = viewer(5);
-        assert_eq!(v.max_offset, 0);
-        let mut out = Vec::new();
-        v.render_scrollbar(&mut out, usize::from(v.visible_rows()))
-            .unwrap();
-        assert!(out.is_empty(), "expected no output: {out:?}");
+    fn scrollbar_hit_region_stops_where_the_bar_renders() {
+        let v = scrolling_viewer(100, 20, 40);
+        let canvas = v.compose();
+        assert!(
+            canvas.press(39, 0, v.max_offset, Gesture::Press).is_some(),
+            "the thumb column inside the content rows is scrollbar for clicks"
+        );
+        assert!(
+            canvas
+                .press(39, v.visible_rows(), v.max_offset, Gesture::Press)
+                .is_none(),
+            "the help bar's row in the last column must not be scrollbar"
+        );
+        assert!(
+            canvas.press(38, 0, v.max_offset, Gesture::Press).is_none(),
+            "the content column must not be scrollbar"
+        );
     }
 
     #[test]
-    fn offset_from_thumb_top_is_monotonic_and_bounded() {
-        let v = viewer(100);
-        let visible = usize::from(v.visible_rows());
-        let g = v.scroll_geometry(visible).expect("scrollbar present");
-        let travel = i64::try_from(g.visible - g.size).unwrap_or(i64::MAX);
-
-        assert_eq!(v.offset_from_thumb_top(-5, &g), 0);
-        assert_eq!(v.offset_from_thumb_top(0, &g), 0);
-        assert_eq!(v.offset_from_thumb_top(travel, &g), v.max_offset);
-
-        let mut prev = 0;
-        for top in 0..=travel {
-            let off = v.offset_from_thumb_top(top, &g);
-            assert!(off >= prev, "not monotonic at top={top}");
-            assert!(off <= v.max_offset, "exceeds max_offset at top={top}");
-            prev = off;
-        }
+    fn compose_releases_the_scrollbar_when_everything_fits() {
+        let v = scrolling_viewer(5, 20, 40);
+        assert!(
+            v.compose().areas().iter().all(|area| area.width != 1),
+            "a document that fits must not reserve a scrollbar"
+        );
     }
 
     #[test]
-    fn dragging_keeps_thumb_on_mouse() {
-        let mut v = viewer(100);
-        let visible = v.visible_rows() as usize;
-        let g = v.scroll_geometry(visible).unwrap();
-
-        for mouse_y in 0..u16::try_from(visible).unwrap_or(u16::MAX) {
-            let off = v.offset_from_thumb_top(i64::from(mouse_y), &g);
-            v.offset = off;
-            let moved = v.scroll_geometry(visible).unwrap();
-            let travel = g.visible - g.size;
-            let desired = usize::from(mouse_y).clamp(0, travel);
-            assert!(
-                moved.top.abs_diff(desired) <= 1,
-                "thumb at {} dragged to {} for y={}",
-                moved.top,
-                desired,
-                mouse_y
+    fn compose_grants_a_scrollbar_area_when_and_only_when_the_column_is_reserved() {
+        for lines in [5usize, 10, 50, 100] {
+            let v = scrolling_viewer(lines, 20, 40);
+            let overflows = v.display.len() > usize::from(v.visible_rows());
+            let granted = v
+                .compose()
+                .areas()
+                .iter()
+                .any(|area| area.width == 1 && area.col == 39);
+            assert_eq!(
+                granted, v.scrollbar_active,
+                "the canvas must grant a scrollbar iff the column was reserved ({lines} lines)"
+            );
+            assert_eq!(
+                overflows, v.scrollbar_active,
+                "the reserved column must track exactly the overflow ({lines} lines)"
             );
         }
+    }
+
+    #[test]
+    fn draw_writes_every_piece_inside_its_granted_area() {
+        let mut v = scrolling_viewer(100, 20, 40);
+        let mut out = Vec::new();
+        v.draw(&mut out).unwrap();
+        let areas = v.compose().areas();
+
+        let moves = parse_moves(&out);
+        assert!(!moves.is_empty(), "draw must emit cursor moves");
+        for (row, col) in moves {
+            let cell = (col - 1, row - 1);
+            assert!(
+                areas.iter().any(|area| area.contains(cell.0, cell.1)),
+                "draw moved the cursor to ({row}, {col}), outside every granted area: {out:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn draw_survives_narrow_viewport_with_wide_content() {
+        let text = "🎉\t🎉";
+        for cols in [1u16, 5] {
+            let config = TxtViewConfig {
+                viewport_height: Some(8),
+                viewport_width: Some(cols),
+                show_help_bar: false,
+                show_scrollbar: false,
+                ..TxtViewConfig::default()
+            };
+            let mut v = TxtView::new(text).with_config(config);
+            let mut out = Vec::new();
+            assert!(
+                v.draw(&mut out).is_ok(),
+                "a {cols}-column viewport must not fault on 2-wide chars and tabs"
+            );
+            assert!(
+                max_move_to_row(&out) <= 8,
+                "writes must stay inside the 8-row viewport at {cols} columns"
+            );
+        }
+    }
+
+    #[test]
+    fn resize_during_drag_keeps_the_grab_consistent() {
+        let mut v = scrolling_viewer(100, 20, 40);
+        assert!(v.scrollbar_active, "fixture must overflow");
+        v.drag_grab_offset = Some(1);
+
+        assert!(
+            v.compose()
+                .press(39, 5, v.max_offset, Gesture::Drag)
+                .is_some(),
+            "a grabbed bar must keep answering drags"
+        );
+
+        let config = TxtViewConfig {
+            viewport_height: Some(10),
+            ..v.config().clone()
+        };
+        v = v.with_config(config);
+        assert!(v.scrollbar_active, "still overflows after the shrink");
+        assert!(
+            v.drag_grab_offset.is_some(),
+            "an Up event that never arrived must leave the grab armed"
+        );
+        assert!(
+            v.compose()
+                .press(39, 2, v.max_offset, Gesture::Drag)
+                .is_some(),
+            "a drag must keep working across the resize"
+        );
+
+        v.drag_grab_offset = None;
+        assert_eq!(
+            v.compose().press(39, 2, v.max_offset, Gesture::Drag),
+            None,
+            "releasing the grab must silence further drags"
+        );
     }
 }

@@ -1,12 +1,9 @@
-mod ansi;
 mod layout;
 #[cfg(test)]
 mod layout_tests;
 mod navigation;
 mod render;
 mod run;
-mod sgr;
-mod wrap;
 
 use crate::TxtViewConfig;
 
@@ -33,8 +30,7 @@ pub struct TxtView {
     offset: usize,
     max_offset: usize,
     config: TxtViewConfig,
-    dragging: bool,
-    drag_grab_offset: usize,
+    drag_grab_offset: Option<usize>,
     scrollbar_active: bool,
     display_geometry: Option<(usize, usize)>,
     #[cfg(test)]
@@ -65,8 +61,7 @@ impl TxtView {
             offset: 0,
             max_offset: 0,
             config: TxtViewConfig::default(),
-            dragging: false,
-            drag_grab_offset: 0,
+            drag_grab_offset: None,
             scrollbar_active: false,
             display_geometry: None,
             #[cfg(test)]

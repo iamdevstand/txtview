@@ -6,26 +6,29 @@
 
 /// Whether `c` is rendered as 2-column caret notation (`^X` / `^?`).
 ///
-/// C0 controls (except tab and `ESC`, which are handled elsewhere) and DEL are
-/// escaped so they never reach the terminal as live control bytes.
+/// C0 controls (except tab and `ESC`, which are handled elsewhere), DEL and
+/// C1 controls are escaped so they never reach the terminal as live control
+/// bytes.
 pub(super) fn caret_width(c: char) -> bool {
     let code = c as u32;
-    code <= 0x1f || code == 0x7f
+    code <= 0x1f || (0x7f..=0x9f).contains(&code)
 }
 
 /// Render a control character as its visible caret-notation equivalent.
 ///
 /// C0 controls map to `^@`..=`^_` (e.g. BEL → `^G`, backspace → `^H`,
-/// CR → `^M`); DEL maps to `^?`. C1 controls are returned unchanged.
+/// CR → `^M`); DEL maps to `^?`; C1 controls (the 8-bit control set, the
+/// high-bit equivalents of C0, e.g. 8-bit CSI → `^[`) map the same way so
+/// they can never execute on the terminal.
 pub(super) fn caret_notation(c: char) -> String {
     let code = c as u32;
-    if code <= 0x1f {
-        let letter = char::from_u32(code + 0x40).unwrap_or('?');
-        format!("^{letter}")
-    } else if code == 0x7f {
-        "^?".to_string()
-    } else {
-        c.to_string()
+    match code {
+        0..=0x1f | 0x80..=0x9f => {
+            let letter = char::from_u32(code % 0x40 + 0x40).unwrap_or('?');
+            format!("^{letter}")
+        }
+        0x7f => "^?".to_string(),
+        _ => c.to_string(),
     }
 }
 

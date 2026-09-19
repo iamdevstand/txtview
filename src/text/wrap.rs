@@ -20,10 +20,10 @@ use super::sgr::SgrState;
 ///   modifiers, ZWJ sequences and flag pairs never split across a wrap,
 /// - SGR (`ESC [...]m`) and OSC8 hyperlinks pass through raw (OSC8 emits as
 ///   one atomic unit so a wrap can never split it),
-/// - C0 controls, DEL, and every other escape become visible caret
+/// - C0 and C1 controls, DEL, and every other escape become visible caret
 ///   notation,
 /// - tabs keep their literal byte and are wrapped at their 8-column stop.
-pub(super) fn wrap_line_ansi(line: &str, width: usize, start_col: usize) -> Vec<String> {
+pub(crate) fn wrap_line_ansi(line: &str, width: usize, start_col: usize) -> Vec<String> {
     const TAB_WIDTH: usize = 8;
     let width = width.max(1);
     let bytes = line.as_bytes();
@@ -74,7 +74,7 @@ pub(super) fn wrap_line_ansi(line: &str, width: usize, start_col: usize) -> Vec<
             // Map the character to the text placed in the chunk, neutralizing
             // control bytes so they cannot corrupt the terminal:
             // - tab keeps its literal byte (wrapped at its 8-column stop),
-            // - C0 controls and DEL become visible caret notation.
+            // - C0/C1 controls and DEL become visible caret notation.
             let replacement: Cow<'_, str> = match c {
                 '\t' => Cow::Borrowed(cluster),
                 c if c.is_control() => Cow::Owned(caret_notation(c)),
@@ -128,7 +128,7 @@ pub(super) fn wrap_line_ansi(line: &str, width: usize, start_col: usize) -> Vec<
 /// U+FE0F variation selector (e.g. ❤️, ©️) or a U+20E3 keycap (e.g. #️⃣, 1️⃣)
 /// for rendering at double width in modern terminals; `unicode-width` keeps
 /// the base char's text width, so bump those clusters to two columns.
-fn cluster_visual_width(cluster: &str) -> usize {
+pub(super) fn cluster_visual_width(cluster: &str) -> usize {
     let width = cluster
         .chars()
         .map(|c| c.width().unwrap_or(1))
@@ -331,6 +331,23 @@ mod tests {
     fn control_chars_become_caret_notation() {
         let chunks = wrap_line_ansi("a\x07b\x08c\x7fd", 20, 0);
         assert_eq!(chunks, vec!["a^Gb^Hc^?d"]);
+    }
+
+    #[test]
+    fn c1_controls_become_caret_notation() {
+        // U+009B is the 8-bit CSI and U+0085 the 8-bit NEL; fed to a terminal
+        // raw they execute, so they must become visible caret notation.
+        assert_eq!(wrap_line_ansi("a\u{9b}2Jb\u{85}", 20, 0), vec!["a^[2Jb^E"]);
+        assert_eq!(
+            wrap_line_ansi("\u{9b}2J", 3, 0),
+            vec!["^[2", "J"],
+            "8-bit CSI caret notation must count two columns"
+        );
+        assert_eq!(
+            wrap_line_ansi("\u{80}\u{9f}", 20, 0),
+            vec!["^@^_"],
+            "C1 maps to the same caret range as its C0 equivalent"
+        );
     }
 
     #[test]

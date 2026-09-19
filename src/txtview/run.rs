@@ -13,6 +13,7 @@ use crossterm::{
 };
 
 use super::TxtView;
+use crate::surface::{Gesture, Request};
 
 const PAGE_JUMP_COOLDOWN: Duration = Duration::from_millis(200);
 
@@ -39,8 +40,8 @@ impl TxtView {
     ///
     /// # Errors
     ///
-    /// Returns [`io::Error`] with [`io::ErrorKind::NotConnected`] when stdin
-    /// or stdout is not a terminal (for example when output is piped), and
+    /// Returns [`io::Error`] with [`io::ErrorKind::NotConnected`] when stdout
+    /// is not a terminal (for example when output is piped), and
     /// propagates I/O errors from the terminal itself or the event loop.
     ///
     /// # Keybindings
@@ -127,40 +128,42 @@ impl TxtView {
                         self.apply_scroll(stdout, delta)?;
                     }
                     MouseEventKind::Down(MouseButton::Left) => {
-                        let visible = usize::from(self.visible_rows());
-                        if let Some(g) = self.scroll_geometry(visible)
-                            && mouse.column == g.column
-                        {
-                            let y = usize::from(mouse.row);
-                            if y >= g.top && y < g.top + g.size {
-                                self.dragging = true;
-                                self.drag_grab_offset = y - g.top;
+                        let request = self.compose().press(
+                            mouse.column,
+                            mouse.row,
+                            self.max_offset,
+                            Gesture::Press,
+                        );
+                        match request {
+                            Some(Request::Grab { grab_offset }) => {
+                                self.drag_grab_offset = Some(grab_offset);
                                 self.draw(stdout)?;
-                            } else {
-                                let size = g.size.max(1);
-                                let center = y.saturating_sub(size / 2);
-                                let target = self.offset_from_thumb_top(
-                                    i64::try_from(center).unwrap_or(i64::MAX),
-                                    &g,
-                                );
+                            }
+                            Some(Request::DragTo {
+                                target,
+                                grab_offset,
+                            }) => {
+                                self.drag_grab_offset = Some(grab_offset);
                                 let delta = self.scroll_to(target);
                                 self.apply_scroll(stdout, delta)?;
-                                self.dragging = true;
-                                self.drag_grab_offset = size.div_ceil(2).min(size - 1);
                             }
+                            None => {}
                         }
                     }
-                    MouseEventKind::Drag(MouseButton::Left) if self.dragging => {
-                        if let Some(g) = self.scroll_geometry(usize::from(self.visible_rows())) {
-                            let top = i64::from(mouse.row)
-                                - i64::try_from(self.drag_grab_offset).unwrap_or(i64::MAX);
-                            let target = self.offset_from_thumb_top(top, &g);
+                    MouseEventKind::Drag(MouseButton::Left) if self.drag_grab_offset.is_some() => {
+                        let request = self.compose().press(
+                            mouse.column,
+                            mouse.row,
+                            self.max_offset,
+                            Gesture::Drag,
+                        );
+                        if let Some(Request::DragTo { target, .. }) = request {
                             let delta = self.scroll_to(target);
                             self.apply_scroll(stdout, delta)?;
                         }
                     }
-                    MouseEventKind::Up(_) if self.dragging => {
-                        self.dragging = false;
+                    MouseEventKind::Up(_) if self.drag_grab_offset.is_some() => {
+                        self.drag_grab_offset = None;
                         self.draw(stdout)?;
                     }
                     _ => {}
