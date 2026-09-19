@@ -13,10 +13,9 @@ pub(crate) mod sgr;
 pub(crate) mod wrap;
 
 use unicode_segmentation::UnicodeSegmentation;
-use unicode_width::UnicodeWidthChar;
 
-use self::ansi::{Esc, caret_width, escape_display, parse_escape};
-use self::wrap::cluster_visual_width;
+use self::ansi::{Esc, display_width, escape_display, parse_escape};
+use self::wrap::cluster_width_at;
 
 pub(crate) use self::wrap::wrap_line_ansi;
 
@@ -36,27 +35,13 @@ pub(crate) fn visual_len(s: &str) -> usize {
             let (end, kind) = parse_escape(bytes, i);
             let seq = &s[i..end];
             if !matches!(kind, Esc::Sgr | Esc::Osc8) {
-                width += escape_display(seq)
-                    .chars()
-                    .map(|c| c.width().unwrap_or(1))
-                    .sum::<usize>();
+                width += display_width(&escape_display(seq));
             }
             i = end;
             continue;
         }
         let cluster = &s[i..].graphemes(true).next().unwrap_or_default();
-        let c = cluster.chars().next().unwrap_or('\u{fffd}');
-        width += match c {
-            '\t' => 8 - width % 8,
-            c if c.is_control() => {
-                if caret_width(c) {
-                    2
-                } else {
-                    1
-                }
-            }
-            _ => cluster_visual_width(cluster),
-        };
+        width += cluster_width_at(cluster, width);
         i += cluster.len();
     }
     width

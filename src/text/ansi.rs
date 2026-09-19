@@ -4,6 +4,8 @@
 //! notation so they can never execute on the terminal. SGR styling and OSC8
 //! hyperlinks are classified for raw passthrough by [super::wrap].
 
+use unicode_width::UnicodeWidthChar;
+
 /// Whether `c` is rendered as 2-column caret notation (`^X` / `^?`).
 ///
 /// C0 controls (except tab and `ESC`, which are handled elsewhere), DEL and
@@ -113,4 +115,10 @@ pub(super) fn escape_display(seq: &str) -> String {
         }
     }
     out
+}
+
+/// The terminal columns of a run of already-neutralized display text: each
+/// character takes its Unicode width, with a guaranteed minimum of one.
+pub(super) fn display_width(text: &str) -> usize {
+    text.chars().map(|c| c.width().unwrap_or(1)).sum()
 }

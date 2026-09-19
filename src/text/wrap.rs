@@ -4,10 +4,32 @@
 use std::borrow::Cow;
 
 use unicode_segmentation::UnicodeSegmentation;
-use unicode_width::UnicodeWidthChar;
 
-use super::ansi::{Esc, caret_notation, caret_width, escape_display, parse_escape};
+use super::ansi::{Esc, caret_notation, caret_width, display_width, escape_display, parse_escape};
 use super::sgr::SgrState;
+
+/// Columns between tab stops.
+const TAB_WIDTH: usize = 8;
+
+/// The terminal columns a grapheme cluster starting at column `col` occupies,
+/// measured the way the wrapper lays rows out: a tab advances to its next
+/// 8-column stop, a control character takes its caret notation width, and
+/// anything else keeps its [`cluster_visual_width`]. Both the wrapper and
+/// [`visual_len`](super::visual_len) measure rows through this one function.
+pub(super) fn cluster_width_at(cluster: &str, col: usize) -> usize {
+    let c = cluster.chars().next().unwrap_or('\u{fffd}');
+    match c {
+        '\t' => TAB_WIDTH - col % TAB_WIDTH,
+        c if c.is_control() => {
+            if caret_width(c) {
+                2
+            } else {
+                1
+            }
+        }
+        _ => cluster_visual_width(cluster),
+    }
+}
 
 /// Wrap `line` into visual rows of at most `width` terminal columns.
 ///
@@ -24,7 +46,6 @@ use super::sgr::SgrState;
 ///   notation,
 /// - tabs keep their literal byte and are wrapped at their 8-column stop.
 pub(crate) fn wrap_line_ansi(line: &str, width: usize, start_col: usize) -> Vec<String> {
-    const TAB_WIDTH: usize = 8;
     let width = width.max(1);
     let bytes = line.as_bytes();
     let mut chunks = Vec::new();
@@ -57,10 +78,7 @@ pub(crate) fn wrap_line_ansi(line: &str, width: usize, start_col: usize) -> Vec<
                     // It is emitted as one atomic unit: never executed, never
                     // split across a wrap boundary.
                     let display = escape_display(seq);
-                    let width = display
-                        .chars()
-                        .map(|c| c.width().unwrap_or(1))
-                        .sum::<usize>();
+                    let width = display_width(&display);
                     (Cow::Owned(display), width, end)
                 }
             }
@@ -80,17 +98,7 @@ pub(crate) fn wrap_line_ansi(line: &str, width: usize, start_col: usize) -> Vec<
                 c if c.is_control() => Cow::Owned(caret_notation(c)),
                 _ => Cow::Borrowed(cluster),
             };
-            let ch_width = match c {
-                '\t' => TAB_WIDTH - (start_col + visible_width) % TAB_WIDTH,
-                c if c.is_control() => {
-                    if caret_width(c) {
-                        2
-                    } else {
-                        1
-                    }
-                }
-                _ => cluster_visual_width(cluster),
-            };
+            let ch_width = cluster_width_at(cluster, start_col + visible_width);
             (replacement, ch_width, end)
         };
         i = next;
@@ -129,10 +137,7 @@ pub(crate) fn wrap_line_ansi(line: &str, width: usize, start_col: usize) -> Vec<
 /// for rendering at double width in modern terminals; `unicode-width` keeps
 /// the base char's text width, so bump those clusters to two columns.
 pub(super) fn cluster_visual_width(cluster: &str) -> usize {
-    let width = cluster
-        .chars()
-        .map(|c| c.width().unwrap_or(1))
-        .sum::<usize>();
+    let width = display_width(cluster);
     if cluster.contains('\u{fe0f}') || cluster.contains('\u{20e3}') {
         width.max(2)
     } else {
