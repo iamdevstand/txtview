@@ -16,10 +16,10 @@ impl TxtView {
     /// The viewport width, clamped to the terminal the way the height is, so
     /// a configured width wider than the terminal cannot push writes past its
     /// edge.
-    fn resolved_width(&self) -> usize {
-        let cols = usize::from(Self::term_size().0);
+    fn resolved_width(&self) -> u16 {
+        let cols = Self::term_size().0;
         match self.config.viewport_width {
-            Some(w) => usize::from(w).min(cols),
+            Some(w) => w.min(cols),
             None => cols,
         }
     }
@@ -36,23 +36,27 @@ impl TxtView {
         "q: quit | ↑/↓, j/k, Mouse: scroll | PgUp/PgDn: page | Home/End, g/G: start/end".to_string()
     }
 
-    fn help_height(&self) -> usize {
+    fn help_height(&self) -> u16 {
         if !self.config.show_help_bar {
             return 0;
         }
-        HelpBar::new(Self::help_text()).height(self.resolved_width(), self.resolved_height())
+        HelpBar::new(Self::help_text())
+            .height(usize::from(self.resolved_width()), self.resolved_height())
     }
 
     /// The columns the viewport spans: the resolved width, before the
     /// scrollbar column is carved out of the content's text.
     pub(super) fn content_cols(&self) -> u16 {
-        u16::try_from(self.resolved_width()).unwrap_or(u16::MAX)
+        self.resolved_width()
     }
 
     /// The rows the content owns once the help bar takes its footprint.
     pub(super) fn visible_rows(&self) -> u16 {
+        // `resolved_height` and `help_height` are both u16, so the whole
+        // geometry here stays in u16 and can never need a truncating
+        // conversion
         self.resolved_height()
-            .saturating_sub(u16::try_from(self.help_height()).unwrap_or(u16::MAX))
+            .saturating_sub(self.help_height())
             .max(1)
     }
 

@@ -113,10 +113,22 @@ impl ScrollBar {
 
 impl Component for ScrollBar {
     fn area(&self, boxed: Area) -> Area {
-        let extent = u16::try_from(self.geometry.visible).unwrap_or(u16::MAX);
+        // `geometry.visible` comes from a u16 viewport row count, so this
+        // cannot truncate. If it ever did, falling back to the box dimension
+        // keeps the thumb in-bounds instead of silently spanning the world
         match self.orientation {
-            Orientation::Vertical => boxed.place(1, extent.min(boxed.height), Anchor::TopRight),
-            Orientation::Horizontal => boxed.place(extent.min(boxed.width), 1, Anchor::BottomLeft),
+            Orientation::Vertical => {
+                let extent = u16::try_from(self.geometry.visible)
+                    .unwrap_or(boxed.height)
+                    .min(boxed.height);
+                boxed.place(1, extent, Anchor::TopRight)
+            }
+            Orientation::Horizontal => {
+                let extent = u16::try_from(self.geometry.visible)
+                    .unwrap_or(boxed.width)
+                    .min(boxed.width);
+                boxed.place(extent, 1, Anchor::BottomLeft)
+            }
         }
     }
 
@@ -167,8 +179,11 @@ impl Component for ScrollBar {
         }
         match self.orientation {
             Orientation::Vertical => {
+                // `geometry.visible` is bounded by a u16 viewport, so this
+                // cannot truncate. A fallback of the full area keeps every
+                // painted cell on the track
                 let cells = u16::try_from(self.geometry.visible)
-                    .unwrap_or(u16::MAX)
+                    .unwrap_or(area.height)
                     .min(area.height);
                 for i in 0..cells {
                     let ch = self.cell(usize::from(i));
@@ -178,7 +193,7 @@ impl Component for ScrollBar {
             }
             Orientation::Horizontal => {
                 let cells = u16::try_from(self.geometry.visible)
-                    .unwrap_or(u16::MAX)
+                    .unwrap_or(area.width)
                     .min(area.width);
                 for i in 0..cells {
                     let ch = self.cell(usize::from(i));

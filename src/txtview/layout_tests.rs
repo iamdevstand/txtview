@@ -282,7 +282,7 @@ fn dragging_keeps_thumb_on_mouse() {
     let visible = v.visible_rows() as usize;
     let g = v.scroll_geometry(visible).unwrap();
 
-    for mouse_y in 0..u16::try_from(visible).unwrap_or(u16::MAX) {
+    for mouse_y in 0..u16::try_from(visible).unwrap_or(0) {
         let off = g.offset_from_thumb_top(i64::from(mouse_y), v.max_offset);
         v.offset = off;
         let moved = v.scroll_geometry(visible).unwrap();
@@ -308,7 +308,7 @@ fn non_divisible_geometry_keeps_thumb_bounded_and_near_mouse() {
     );
 
     let mut prev = 0;
-    for mouse_y in 0..u16::try_from(visible).unwrap_or(u16::MAX) {
+    for mouse_y in 0..u16::try_from(visible).unwrap_or(0) {
         let off = g.offset_from_thumb_top(i64::from(mouse_y), v.max_offset);
         v.offset = off;
         let moved = v.scroll_geometry(visible).unwrap();

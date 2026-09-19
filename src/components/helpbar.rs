@@ -28,19 +28,24 @@ impl HelpBar {
     /// The rows the bar needs when pinned to the bottom of a `rows`-high
     /// viewport: the separator plus the wrapped help lines that fit. Zero
     /// when there is no room for it at all.
-    pub(crate) fn height(&self, cols: usize, rows: u16) -> usize {
+    pub(crate) fn height(&self, cols: usize, rows: u16) -> u16 {
         if rows < 2 {
             return 0;
         }
         let lines = wrap_line_ansi(&self.text, cols.max(1), 0);
-        1 + lines.len().min(usize::from(rows) - 2)
+        let available = rows - 2;
+        // `available` is a u16 and `shown` is clamped to it, so this cannot
+        // truncate, the fallback keeps the bar small rather than absurd
+        let shown = u16::try_from(lines.len())
+            .unwrap_or(available)
+            .min(available);
+        1 + shown
     }
 }
 
 impl Component for HelpBar {
     fn area(&self, boxed: Area) -> Area {
         let height = self.height(usize::from(boxed.width), boxed.height);
-        let height = u16::try_from(height).unwrap_or(u16::MAX);
         boxed.place(boxed.width, height, Anchor::BottomLeft)
     }
 
@@ -51,14 +56,22 @@ impl Component for HelpBar {
 
         let cols = usize::from(area.width).max(1);
         let lines = wrap_line_ansi(&self.text, cols, 0);
-        let shown = lines.len().min(usize::from(area.height) - 1);
+        // `lines.len()` is `usize`, the range below needs a `u16` count. The
+        // count is clamped to the granted area, so this cannot produce a value
+        // that overflows `area.height - 1`, the fallback is the largest bar
+        // that the area can hold, never an out-of-bounds row
+        let shown = area
+            .height
+            .saturating_sub(1)
+            .min(u16::try_from(lines.len()).unwrap_or(area.height.saturating_sub(1)));
 
         QueueableCommand::queue(out, MoveTo(area.col, area.row))?;
         QueueableCommand::queue(out, Clear(ClearType::CurrentLine))?;
         write!(out, "{}", "─".repeat(cols))?;
 
-        for (i, line) in lines.iter().take(shown).enumerate() {
-            let row = area.row + 1 + u16::try_from(i).unwrap_or(u16::MAX);
+        for offset in 1..=shown {
+            let row = area.row.saturating_add(offset);
+            let line = &lines[usize::from(offset - 1)];
             QueueableCommand::queue(out, MoveTo(area.col, row))?;
             QueueableCommand::queue(out, Clear(ClearType::CurrentLine))?;
             write!(out, "{}", line)?;
