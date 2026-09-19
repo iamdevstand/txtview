@@ -8,6 +8,15 @@ use crate::components::HelpBar;
 use crate::components::scrollbar::ScrollGeometry;
 use crate::text::wrap_line_ansi;
 
+/// The geometry the wrapped display is produced from: the columns available
+/// to the text and the width of the line-number prefix. Carried as a named
+/// struct so the two values cannot be swapped in a call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct LayoutGeometry {
+    avail: usize,
+    prefix_width: usize,
+}
+
 impl TxtView {
     pub(super) fn term_size() -> (u16, u16) {
         terminal::size().unwrap_or((80, 24))
@@ -60,7 +69,7 @@ impl TxtView {
             .max(1)
     }
 
-    fn layout_geometry(&self) -> (usize, usize) {
+    fn layout_geometry(&self) -> LayoutGeometry {
         let cols = usize::from(self.content_cols().max(1));
         let scrollbar_width = if self.config.show_scrollbar && self.scrollbar_active {
             1
@@ -76,17 +85,20 @@ impl TxtView {
             .saturating_sub(prefix_width)
             .saturating_sub(scrollbar_width)
             .max(1);
-        (avail, prefix_width)
+        LayoutGeometry {
+            avail,
+            prefix_width,
+        }
     }
 
-    fn build_display(&self, avail: usize, prefix_width: usize) -> Vec<String> {
+    fn build_display(&self, geometry: LayoutGeometry) -> Vec<String> {
         let mut display = Vec::new();
 
         for (i, line) in self.lines.iter().enumerate() {
             if line.is_empty() {
                 display.push(self.line_prefix(i, 0));
             } else {
-                let chunks = wrap_line_ansi(line, avail, prefix_width);
+                let chunks = wrap_line_ansi(line, geometry.avail, geometry.prefix_width);
                 for (ci, chunk) in chunks.iter().enumerate() {
                     let mut row = self.line_prefix(i, ci);
                     row.push_str(chunk);
@@ -104,16 +116,16 @@ impl TxtView {
             self.rebuild_count += 1;
         }
         self.scrollbar_active = false;
-        let (avail, prefix_width) = self.layout_geometry();
-        self.display_geometry = Some((avail, prefix_width));
-        self.display = self.build_display(avail, prefix_width);
+        let geometry = self.layout_geometry();
+        self.display_geometry = Some(geometry);
+        self.display = self.build_display(geometry);
         if self.config.show_scrollbar
             && ScrollGeometry::room_to_travel(self.display.len(), usize::from(self.visible_rows()))
         {
             self.scrollbar_active = true;
-            let (avail, prefix_width) = self.layout_geometry();
-            self.display_geometry = Some((avail, prefix_width));
-            self.display = self.build_display(avail, prefix_width);
+            let geometry = self.layout_geometry();
+            self.display_geometry = Some(geometry);
+            self.display = self.build_display(geometry);
         }
     }
 

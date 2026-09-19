@@ -7,6 +7,8 @@ mod run;
 
 use crate::TxtViewConfig;
 
+use layout::LayoutGeometry;
+
 /// A terminal text viewer.
 ///
 /// Wrap any text with [`TxtView::new`], optionally tweak it with
@@ -32,7 +34,7 @@ pub struct TxtView {
     config: TxtViewConfig,
     drag_grab_offset: Option<usize>,
     scrollbar_active: bool,
-    display_geometry: Option<(usize, usize)>,
+    display_geometry: Option<LayoutGeometry>,
     #[cfg(test)]
     rebuild_count: usize,
 }
