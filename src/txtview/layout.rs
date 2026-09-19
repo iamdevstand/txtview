@@ -103,7 +103,9 @@ impl TxtView {
         let (avail, prefix_width) = self.layout_geometry();
         self.display_geometry = Some((avail, prefix_width));
         self.display = self.build_display(avail, prefix_width);
-        if self.config.show_scrollbar && self.display.len() > usize::from(self.visible_rows()) {
+        if self.config.show_scrollbar
+            && ScrollGeometry::room_to_travel(self.display.len(), usize::from(self.visible_rows()))
+        {
             self.scrollbar_active = true;
             let (avail, prefix_width) = self.layout_geometry();
             self.display_geometry = Some((avail, prefix_width));
@@ -125,8 +127,8 @@ impl TxtView {
     }
 
     pub(super) fn refresh_bounds(&mut self) {
-        let overflows =
-            self.config.show_scrollbar && self.display.len() > usize::from(self.visible_rows());
+        let overflows = self.config.show_scrollbar
+            && ScrollGeometry::room_to_travel(self.display.len(), usize::from(self.visible_rows()));
         if overflows != self.scrollbar_active
             || self.display_geometry != Some(self.layout_geometry())
         {
@@ -146,13 +148,22 @@ impl TxtView {
     /// The thumb geometry for a scrollbar spanning `visible` cells along its
     /// axis.
     ///
+    /// The thumb is capped so it always keeps
+    /// [`MIN_TRAVEL`](ScrollGeometry::MIN_TRAVEL) cells of the track free to
+    /// travel: a document that barely overflows yields a thumb that gives up
+    /// a little proportional accuracy rather than a solid block with no room
+    /// to show position. Both the forward mapping (offset to top) and the
+    /// inverse (top to offset) round to the nearest cell, so the thumb sits
+    /// centered on the true fraction instead of always under-stepping it.
+    ///
     /// Whether a bar exists is decided by `scrollbar_active` alone: the
     /// scrollbar is composed exactly when the flag is set, and
     /// [`TxtView::refresh_bounds`] keeps the flag equal to "the document
-    /// overflows the viewport", so the two-pass layout and the canvas can
-    /// never disagree about the bar's presence. The guard is belt-and-braces
-    /// against a transiently inconsistent frame: it returns `None`, and
-    /// `compose` then draws no bar for one frame instead of faulting.
+    /// overflows the viewport AND the track can host a moving thumb", ruling
+    /// the two-pass layout and the canvas agree about the bar's presence. The
+    /// guard is belt-and-braces against a transiently inconsistent frame: it
+    /// returns `None`, and `compose` then draws no bar for one frame instead
+    /// of faulting.
     pub(super) fn scroll_geometry(&self, visible: usize) -> Option<ScrollGeometry> {
         if !self.scrollbar_active || visible == 0 {
             return None;
@@ -163,12 +174,20 @@ impl TxtView {
         );
         let travel = self.max_offset.max(1);
         let total = self.display.len().max(1);
-        let thumb = (visible * visible / total).max(1).min(visible);
-        let top = (self.offset.saturating_mul(visible - thumb) / travel).min(visible - thumb);
-        Some(ScrollGeometry {
-            top,
-            size: thumb,
-            visible,
-        })
+
+        let max = visible
+            .saturating_sub(ScrollGeometry::MIN_TRAVEL)
+            .max(ScrollGeometry::MIN_THUMB);
+        let size = (visible * visible / total)
+            .max(ScrollGeometry::MIN_THUMB)
+            .min(max);
+        let thumb_travel = visible - size;
+        let top = (self
+            .offset
+            .saturating_mul(thumb_travel)
+            .saturating_add(travel / 2)
+            / travel)
+            .min(thumb_travel);
+        Some(ScrollGeometry { top, size, visible })
     }
 }

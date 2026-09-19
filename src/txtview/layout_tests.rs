@@ -336,6 +336,64 @@ fn non_divisible_geometry_keeps_thumb_bounded_and_near_mouse() {
 }
 
 #[test]
+fn scrollbar_hidden_when_track_cannot_host_thumb_and_travel() {
+    for height in [1, 2] {
+        let config = TxtViewConfig {
+            show_help_bar: false,
+            show_scrollbar: true,
+            viewport_width: Some(80),
+            viewport_height: Some(height),
+            ..TxtViewConfig::default()
+        };
+        let v = TxtView::new(&scratch_lines(100)).with_config(config);
+        assert!(
+            !v.scrollbar_active,
+            "a {height}-row viewport cannot host a thumb plus travel"
+        );
+        assert!(
+            v.scroll_geometry(usize::from(v.visible_rows())).is_none(),
+            "no geometry for a {height}-row viewport"
+        );
+    }
+}
+
+#[test]
+fn thumb_capped_so_a_bare_overflow_keeps_travel_room() {
+    let config = TxtViewConfig {
+        show_help_bar: false,
+        show_scrollbar: true,
+        viewport_width: Some(80),
+        viewport_height: Some(10),
+        ..TxtViewConfig::default()
+    };
+    let v = TxtView::new(&scratch_lines(11)).with_config(config.clone());
+    let geometry = v
+        .scroll_geometry(usize::from(v.visible_rows()))
+        .expect("11 rows over 10 must stay usable");
+    assert_eq!(
+        geometry.visible - geometry.size,
+        2,
+        "the 11-over-10 thumb must give up cells to keep MIN_TRAVEL of travel"
+    );
+
+    let v = TxtView::new(&scratch_lines(100)).with_config(config);
+    let geometry = v
+        .scroll_geometry(usize::from(v.visible_rows()))
+        .expect("a tall document must keep the smallest thumb");
+    assert_eq!(
+        geometry.size, 1,
+        "the cap must not touch normal sized thumbs"
+    );
+}
+
+fn scratch_lines(n: usize) -> String {
+    (0..n)
+        .map(|i| format!("line {i}"))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+#[test]
 fn scrollbar_column_released_when_height_makes_content_fit() {
     let input = (0..11)
         .map(|i| format!("{i:04}"))

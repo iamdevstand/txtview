@@ -18,13 +18,39 @@ pub(crate) struct ScrollGeometry {
 }
 
 impl ScrollGeometry {
+    /// The smallest thumb worth painting. The thumb is capped on the other
+    /// end too, so the bar can neither thin to nothing nor fill the track.
+    pub(crate) const MIN_THUMB: usize = 1;
+
+    /// The thumb must leave at least this many cells of the track free to
+    /// travel through: the thumb is capped to guarantee it, so the bar never
+    /// collapses into one solid block when the document barely overflows the
+    /// viewport. Only a track shorter than `MIN_THUMB + MIN_TRAVEL` cells (a
+    /// one- or two-cell viewport) cannot host both, and the bar vanishes.
+    pub(crate) const MIN_TRAVEL: usize = 2;
+
+    /// Whether a `visible`-cell track over a `total`-cell document can host a
+    /// usable bar at all: the document must overflow the track and the track
+    /// must be long enough for a thumb plus [`MIN_TRAVEL`](Self::MIN_TRAVEL)
+    /// cells of travel. The layout uses this before reserving the scrollbar
+    /// column, so a bar with no room to move is not drawn and its column goes
+    /// back to the content.
+    pub(crate) fn room_to_travel(total: usize, visible: usize) -> bool {
+        total > visible && visible >= Self::MIN_THUMB + Self::MIN_TRAVEL
+    }
+
     /// Map a thumb position (`0..visible`, along the scrollbar's axis) back
     /// to a scroll offset using the same proportion that produced the
-    /// geometry in the first place.
+    /// geometry in the first place, rounding to the nearest offset so an
+    /// inverted drag keeps the thumb under the pointer instead of always
+    /// under-stepping it.
     pub(crate) fn offset_from_thumb_top(&self, top: i64, max_offset: usize) -> usize {
         let travel = self.visible.saturating_sub(self.size).max(1);
         let clamped = usize::try_from(top).unwrap_or(0).min(travel);
-        clamped.saturating_mul(max_offset) / travel
+        let numerator = clamped
+            .saturating_mul(max_offset)
+            .saturating_add(travel / 2);
+        numerator / travel
     }
 }
 
@@ -175,6 +201,39 @@ mod tests {
             size: 3,
             visible: 10,
         }
+    }
+
+    #[test]
+    fn maps_thumb_top_to_offset_rounded_to_nearest() {
+        let g = ScrollGeometry {
+            top: 0,
+            size: 6,
+            visible: 10,
+        };
+        assert_eq!(g.offset_from_thumb_top(0, 5), 0, "track top is offset 0");
+        assert_eq!(g.offset_from_thumb_top(1, 5), 1, "1.25 travels rounds to 1");
+        assert_eq!(g.offset_from_thumb_top(2, 5), 3, "halfway rounds up");
+        assert_eq!(
+            g.offset_from_thumb_top(4, 5),
+            5,
+            "track bottom is max_offset"
+        );
+        assert_eq!(
+            g.offset_from_thumb_top(-2, 5),
+            0,
+            "above the track clamps to 0"
+        );
+    }
+
+    #[test]
+    fn track_too_short_for_thumb_plus_travel_has_no_room() {
+        assert!(!ScrollGeometry::room_to_travel(10, 1));
+        assert!(!ScrollGeometry::room_to_travel(10, 2));
+        assert!(ScrollGeometry::room_to_travel(10, 3));
+        assert!(
+            !ScrollGeometry::room_to_travel(2, 10),
+            "without overflow no bar"
+        );
     }
 
     const COLS: u16 = 5;
