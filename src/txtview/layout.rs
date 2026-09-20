@@ -110,23 +110,40 @@ impl TxtView {
         display
     }
 
+    /// Rewrap the document into `display`, deciding scrollbar presence from
+    /// the wrap itself.
+    ///
+    /// Reserves the scrollbar column before wrapping, so an overflowing
+    /// document (the common large-file case) is wrapped exactly once. The
+    /// column is released, and the text re-wrapped at the full width, only
+    /// when the wrap shows no bar is needed, a cheap pass since a fitting
+    /// document is small. The final `display` always matches the final
+    /// `scrollbar_active`, so the presence check needs no second wrap.
     fn rebuild_display(&mut self) {
         #[cfg(test)]
         {
             self.rebuild_count += 1;
         }
-        self.scrollbar_active = false;
+        self.scrollbar_active = self.config.show_scrollbar;
         let geometry = self.layout_geometry();
         self.display_geometry = Some(geometry);
-        self.display = self.build_display(geometry);
-        if self.config.show_scrollbar
-            && ScrollGeometry::room_to_travel(self.display.len(), usize::from(self.visible_rows()))
-        {
-            self.scrollbar_active = true;
+        self.wrap_once(geometry);
+        if !ScrollGeometry::room_to_travel(self.display.len(), usize::from(self.visible_rows())) {
+            self.scrollbar_active = false;
             let geometry = self.layout_geometry();
             self.display_geometry = Some(geometry);
-            self.display = self.build_display(geometry);
+            self.wrap_once(geometry);
         }
+    }
+
+    /// Lay out the wrapped `display` rows from a geometry, counting each pass
+    /// in tests so a regression test can pin the single-wrap overflow path.
+    fn wrap_once(&mut self, geometry: LayoutGeometry) {
+        #[cfg(test)]
+        {
+            self.wrap_passes += 1;
+        }
+        self.display = self.build_display(geometry);
     }
 
     fn line_prefix(&self, line_index: usize, chunk_index: usize) -> String {
@@ -142,6 +159,14 @@ impl TxtView {
         format!("{:>width$} │ ", label, width = width)
     }
 
+    /// Reconcile the display model with the current configuration and
+    /// viewport size.
+    ///
+    /// Rebuilds the wrapped `display` when the geometry changed (resize or
+    /// config flip) or the overflow state drifted, then recomputes
+    /// `max_offset` and clamps `offset`. All state, no terminal I/O, so it
+    /// runs before composing a frame and can be skipped between mouse events
+    /// as long as nothing layout-affecting changed since the last draw.
     pub(super) fn refresh_bounds(&mut self) {
         let overflows = self.config.show_scrollbar
             && ScrollGeometry::room_to_travel(self.display.len(), usize::from(self.visible_rows()));
@@ -175,8 +200,8 @@ impl TxtView {
     /// Whether a bar exists is decided by `scrollbar_active` alone: the
     /// scrollbar is composed exactly when the flag is set, and
     /// [`TxtView::refresh_bounds`] keeps the flag equal to "the document
-    /// overflows the viewport AND the track can host a moving thumb", ruling
-    /// the two-pass layout and the canvas agree about the bar's presence. The
+    /// overflows the viewport AND the track can host a moving thumb", so the
+    /// wrap-time decision and the canvas agree about the bar's presence. The
     /// guard is belt-and-braces against a transiently inconsistent frame: it
     /// returns `None`, and `compose` then draws no bar for one frame instead
     /// of faulting.

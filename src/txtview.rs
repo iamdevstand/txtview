@@ -37,6 +37,8 @@ pub struct TxtView {
     display_geometry: Option<LayoutGeometry>,
     #[cfg(test)]
     rebuild_count: usize,
+    #[cfg(test)]
+    wrap_passes: usize,
 }
 
 impl TxtView {
@@ -68,6 +70,8 @@ impl TxtView {
             display_geometry: None,
             #[cfg(test)]
             rebuild_count: 0,
+            #[cfg(test)]
+            wrap_passes: 0,
         };
         view.refresh_bounds();
         view

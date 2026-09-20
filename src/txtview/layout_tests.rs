@@ -3,7 +3,7 @@
 //!
 //! These live in a sibling module under `txtview` so they can read the
 //! viewer's private fields (`display`, `offset`, `max_offset`,
-//! `rebuild_count`).
+//! `rebuild_count`, `wrap_passes`).
 
 use crate::TxtViewConfig;
 
@@ -381,6 +381,35 @@ fn thumb_capped_so_a_bare_overflow_keeps_travel_room() {
     assert_eq!(
         geometry.size, 1,
         "the cap must not touch normal sized thumbs"
+    );
+}
+
+#[test]
+fn overflow_reserves_column_only_after_one_wrap() {
+    let v = scrolling_viewer(100);
+    assert!(v.scrollbar_active, "fixture must overflow");
+    assert!(v.rebuild_count >= 1, "construction must have rebuilt");
+    assert_eq!(
+        v.wrap_passes, v.rebuild_count,
+        "an overflowing document must be wrapped once per rebuild: the \
+         scrollbar column is reserved before wrapping, so no re-wrap is needed \
+         to carve it out (wrapped {} times for {} rebuilds)",
+        v.wrap_passes, v.rebuild_count,
+    );
+}
+
+#[test]
+fn fitting_document_releases_the_reserved_column() {
+    let v = scrolling_viewer(5);
+    assert!(
+        !v.scrollbar_active,
+        "a fitting document must not keep a bar"
+    );
+    assert_eq!(
+        v.wrap_passes - v.rebuild_count,
+        v.rebuild_count,
+        "the release re-wrap costs one extra pass per rebuild, on a document \
+         small enough that the reserved-width wrap only just fit"
     );
 }
 
