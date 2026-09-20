@@ -80,8 +80,12 @@ impl TxtView {
     fn event_loop(&mut self, stdout: &mut impl io::Write) -> io::Result<()> {
         self.draw(stdout)?;
 
-        let mut last_page_up_jump = Instant::now();
-        let mut last_page_down_jump = Instant::now();
+        let mut last_page_up_jump = Instant::now()
+            .checked_sub(PAGE_JUMP_COOLDOWN)
+            .unwrap_or_else(Instant::now);
+        let mut last_page_down_jump = Instant::now()
+            .checked_sub(PAGE_JUMP_COOLDOWN)
+            .unwrap_or_else(Instant::now);
 
         loop {
             match event::read()? {
