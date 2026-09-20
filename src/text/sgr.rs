@@ -143,12 +143,62 @@ impl SgrState {
                     continue;
                 }
             };
+            if i > 0 && sep_colon[i] {
+                // A colon-joined slot that its group's handler did not
+                // consume (a stray or over-long modifier list) is dropped
+                // rather than folded as an independent SGR code
+                i += 1;
+                continue;
+            }
+            // Colon-joined slots form one ISO 8613-6 group whose trailing
+            // parameters modify `code`, they are counted here and never
+            // folded as independent codes. The color branch re-sets
+            // `advance` to the exact length of its own group
+            let mut advance = {
+                let mut end = i + 1;
+                while end < params.len() && sep_colon[end] {
+                    end += 1;
+                }
+                end - i - 1
+            };
             match code {
                 SGR_RESET => self.clear(),
-                SGR_BOLD | SGR_DIM | SGR_ITALIC | SGR_UNDERLINE | SGR_BLINK | SGR_RAPID_BLINK
-                | SGR_REVERSE | SGR_CONCEAL | SGR_STRIKE | SGR_DOUBLE_UNDERLINE | SGR_FRAME
-                | SGR_CIRCLE | SGR_OVERLINE => {
+                SGR_BOLD | SGR_DIM | SGR_ITALIC | SGR_BLINK | SGR_RAPID_BLINK | SGR_REVERSE
+                | SGR_CONCEAL | SGR_DOUBLE_UNDERLINE | SGR_FRAME | SGR_CIRCLE | SGR_OVERLINE => {
                     self.attrs.insert(code);
+                    // Any colon modifier on these attributes is unsupported
+                    // and dropped
+                }
+                SGR_UNDERLINE => {
+                    // `4:` carries an underline style selector
+                    self.attrs.insert(SGR_UNDERLINE);
+                    if advance > 0 {
+                        match params[i + 1] {
+                            // `4:0` selects no underline style
+                            Param::Num(0) => {
+                                self.attrs.remove(&SGR_UNDERLINE);
+                                self.attrs.remove(&SGR_DOUBLE_UNDERLINE);
+                            }
+                            // `4:2` selects double underline
+                            Param::Num(2) => {
+                                self.attrs.remove(&SGR_UNDERLINE);
+                                self.attrs.insert(SGR_DOUBLE_UNDERLINE);
+                            }
+                            // `4:1` and the curly/dotted/dashed styles 3-9
+                            // stay single underline; the unsupported style
+                            // selector is dropped
+                            _ => {
+                                self.attrs.remove(&SGR_DOUBLE_UNDERLINE);
+                            }
+                        }
+                    }
+                }
+                SGR_STRIKE => {
+                    // `9:` carries a strikethrough style selector
+                    self.attrs.insert(SGR_STRIKE);
+                    if advance > 0 && params[i + 1] == Param::Num(0) {
+                        self.attrs.remove(&SGR_STRIKE);
+                    }
                 }
                 SGR_DEFAULT_FONT => self.font = None,
                 SGR_ALT_FONT_MIN..=SGR_ALT_FONT_MAX => self.font = Some(code),
@@ -198,7 +248,7 @@ impl SgrState {
                         if let Param::Num(n) = params[i + 2] {
                             let slot = format!("{code};{};{}", SGR_COLOR_INDEXED, n);
                             self.set_color(code, slot);
-                            i += 2;
+                            advance = 2;
                         }
                     } else if paramlen > i + 4 && params[i + 1] == Param::Num(SGR_COLOR_RGB) {
                         // A colon form may carry an optional color-space slot
@@ -219,7 +269,7 @@ impl SgrState {
                             params[r + 2].value()
                         );
                         self.set_color(code, slot);
-                        i += if has_cs { 5 } else { 4 };
+                        advance = if has_cs { 5 } else { 4 };
                     }
                     // A malformed extended color (a bare 38, 48, 58 or
                     // sub-params that are neither 5 nor 2) is ignored
@@ -231,7 +281,7 @@ impl SgrState {
                     self.push_other(code.to_string());
                 }
             }
-            i += 1;
+            i += advance + 1;
         }
     }
 
@@ -418,6 +468,59 @@ mod tests {
             state(&["\x1b[38;2;10;20;30;31m"]),
             Some("\x1b[31m".to_string()),
             "a semicolon form never swallows a trailing code into a color space"
+        );
+    }
+
+    #[test]
+    fn colon_underline_styles_map_to_underline() {
+        assert_eq!(
+            state(&["\x1b[4:2m"]),
+            Some("\x1b[21m".to_string()),
+            "4:2 folds as double underline, not underline plus dim"
+        );
+        assert_eq!(
+            state(&["\x1b[4:3m"]),
+            Some("\x1b[4m".to_string()),
+            "an unsupported 4:3 style must not fold as italic plus underline"
+        );
+        assert_eq!(state(&["\x1b[4:1m"]), Some("\x1b[4m".to_string()));
+        assert_eq!(
+            state(&["\x1b[4:0m"]),
+            None,
+            "4:0 selects no underline style instead of resetting the world"
+        );
+    }
+
+    #[test]
+    fn colon_modifiers_never_fold_as_own_attributes() {
+        assert_eq!(
+            state(&["\x1b[1:1m"]),
+            Some("\x1b[1m".to_string()),
+            "1:1 folds as bold, not bold plus another 1"
+        );
+        assert_eq!(
+            state(&["\x1b[9:2m"]),
+            Some("\x1b[9m".to_string()),
+            "9:2 folds as strikethrough, not strike plus dim"
+        );
+        assert_eq!(state(&["\x1b[9:0m"]), None);
+        assert_eq!(
+            state(&["\x1b[62:3m"]),
+            Some("\x1b[62m".to_string()),
+            "an unknown 62:3 keeps 62 but drops the modifier"
+        );
+    }
+
+    #[test]
+    fn underline_style_survives_inside_a_mixed_row() {
+        assert_eq!(
+            state(&["\x1b[38:2::220:0:0;4:2m"]),
+            Some("\x1b[21;38;2;220;0;0m".to_string())
+        );
+        assert_eq!(
+            state(&["\x1b[4:2m", "\x1b[24m"]),
+            None,
+            "underline-off clears a colon-selected style"
         );
     }
 
