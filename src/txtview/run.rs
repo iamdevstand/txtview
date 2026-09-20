@@ -1,5 +1,6 @@
 use std::io;
 use std::io::IsTerminal;
+use std::io::Write;
 use std::time::{Duration, Instant};
 
 use crossterm::{
@@ -18,8 +19,10 @@ use crate::surface::{Gesture, Request};
 const PAGE_JUMP_COOLDOWN: Duration = Duration::from_millis(200);
 
 /// Restores the terminal when dropped, so raw mode, the alternate screen,
-/// the hidden cursor and mouse capture are always cleaned up — even when a
-/// panic unwinds through the viewer (issue #9).
+/// the hidden cursor and mouse capture are always cleaned up, even when a
+/// panic unwinds through the viewer. Drop cannot report failure, so a
+/// restore that itself errors is silently dropped: the frame flush that
+/// runs before this guard is flushed explicitly and reported instead.
 struct RestoreTerminal;
 
 impl Drop for RestoreTerminal {
@@ -67,7 +70,11 @@ impl TxtView {
         let mut stdout = io::BufWriter::with_capacity(256 * 1024, io::stdout());
 
         execute!(stdout, EnterAlternateScreen, Hide, EnableMouseCapture)?;
-        self.event_loop(&mut stdout)
+        self.event_loop(&mut stdout)?;
+        // Flush the final frame before the writer is dropped, so a write
+        // failure at teardown is reported instead of vanishing with the
+        // buffer. On the error path the event_loop error is the useful one
+        stdout.flush()
     }
 
     fn event_loop(&mut self, stdout: &mut impl io::Write) -> io::Result<()> {
