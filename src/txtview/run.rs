@@ -153,6 +153,12 @@ impl TxtView {
                                 self.drag_grab_offset = Some(grab_offset);
                                 let delta = self.scroll_to(target);
                                 self.apply_scroll(stdout, delta)?;
+                                if delta == 0 {
+                                    // A press already at the target offset
+                                    // leaves the position untouched but arms
+                                    // the grab, so repaint for the fill
+                                    self.draw(stdout)?;
+                                }
                             }
                             None => {}
                         }
