@@ -362,6 +362,26 @@ mod tests {
     }
 
     #[test]
+    fn one_column_viewport_keeps_content_above_the_scrollbar() {
+        let config = TxtViewConfig {
+            viewport_height: Some(3),
+            viewport_width: Some(1),
+            show_help_bar: false,
+            ..TxtViewConfig::default()
+        };
+        let mut v = TxtView::new("a\nb\nc\nd").with_config(config);
+        assert!(v.scrollbar_active, "fixture must overflow the viewport");
+
+        let mut out = Vec::new();
+        v.draw(&mut out).unwrap();
+        let s = String::from_utf8_lossy(&out);
+        assert_eq!(
+            s, "\x1b[1;1Ha\x1b[2;1Hb\x1b[3;1Hc",
+            "a one-column viewport must paint content, not hand it a zero-width box: {s:?}"
+        );
+    }
+
+    #[test]
     fn resize_during_drag_keeps_the_grab_consistent() {
         let mut v = scrolling_viewer(100, 20, 40);
         assert!(v.scrollbar_active, "fixture must overflow");

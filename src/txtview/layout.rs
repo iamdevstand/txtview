@@ -83,18 +83,35 @@ impl TxtView {
             .max(1)
     }
 
-    fn layout_geometry(&self) -> LayoutGeometry {
-        let cols = usize::from(self.content_cols().max(1));
-        let scrollbar_width = if self.config.show_scrollbar && self.scrollbar_active {
-            1
-        } else {
-            0
-        };
-        let prefix_width = if self.config.show_line_numbers {
+    /// The width of the line-number prefix column, zero when line numbers
+    /// are off.
+    fn prefix_width(&self) -> usize {
+        if self.config.show_line_numbers {
             self.lines.len().to_string().len() + 3
         } else {
             0
-        };
+        }
+    }
+
+    /// Whether the scrollbar column is reserved in the current geometry.
+    ///
+    /// A scrollbar only appears when it leaves the text at least three
+    /// columns: on a one- or two-column viewport (or under a wide
+    /// line-number prefix) the track would claim nearly every cell and
+    /// leave Content nothing to paint, contradicting the canvas guarantee
+    /// that content can never be squeezed away entirely.
+    /// When this is false both the wrap geometry and the scrollbar
+    /// placement drop the column, so they always agree.
+    fn scrollbar_reserved(&self) -> bool {
+        self.config.show_scrollbar
+            && self.scrollbar_active
+            && usize::from(self.content_cols()).saturating_sub(self.prefix_width()) >= 3
+    }
+
+    fn layout_geometry(&self) -> LayoutGeometry {
+        let cols = usize::from(self.content_cols().max(1));
+        let scrollbar_width = usize::from(self.scrollbar_reserved());
+        let prefix_width = self.prefix_width();
         let avail = cols
             .saturating_sub(prefix_width)
             .saturating_sub(scrollbar_width)
@@ -211,8 +228,9 @@ impl TxtView {
     /// inverse (top to offset) round to the nearest cell, so the thumb sits
     /// centered on the true fraction instead of always under-stepping it.
     ///
-    /// Whether a bar exists is decided by `scrollbar_active` alone: the
-    /// scrollbar is composed exactly when the flag is set, and
+    /// Whether a bar exists is decided by [`TxtView::scrollbar_reserved`]
+    /// alone: the scrollbar is composed exactly when the flag is set and the
+    /// text keeps at least three columns, and
     /// [`TxtView::refresh_bounds`] keeps the flag equal to "the document
     /// overflows the viewport AND the track can host a moving thumb", so the
     /// wrap-time decision and the canvas agree about the bar's presence. The
@@ -221,7 +239,7 @@ impl TxtView {
     /// of faulting.
     pub(super) fn scroll_geometry(&self) -> Option<ScrollGeometry> {
         let visible = usize::from(self.visible_rows());
-        if !self.scrollbar_active || visible == 0 {
+        if visible == 0 || !self.scrollbar_reserved() {
             return None;
         }
         debug_assert!(
