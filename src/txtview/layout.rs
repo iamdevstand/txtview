@@ -24,11 +24,12 @@ impl TxtView {
 
     /// The viewport width, clamped to the terminal the way the height is, so
     /// a configured width wider than the terminal cannot push writes past its
-    /// edge.
+    /// edge. A fixed width of 0 is lifted to 1, so `Some(0)` shows one column
+    /// instead of silently rendering nothing.
     fn resolved_width(&self) -> u16 {
         let cols = Self::term_size().0;
         match self.config.viewport_width {
-            Some(w) => w.min(cols),
+            Some(w) => w.max(1).min(cols),
             None => cols,
         }
     }
@@ -36,7 +37,7 @@ impl TxtView {
     pub(super) fn resolved_height(&self) -> u16 {
         let rows = Self::term_size().1;
         match self.config.viewport_height {
-            Some(h) => h.min(rows),
+            Some(h) => h.max(1).min(rows),
             None => rows,
         }
     }
@@ -237,12 +238,14 @@ impl TxtView {
             .max(ScrollGeometry::MIN_THUMB)
             .min(max);
         let thumb_travel = visible - size;
-        let top = (self
+        // The offset is clamped to `max_offset`, which is `travel`, so the
+        // rounded proportion can never land past `thumb_travel`: no extra
+        // clamp is needed
+        let top = self
             .offset
             .saturating_mul(thumb_travel)
             .saturating_add(travel / 2)
-            / travel)
-            .min(thumb_travel);
+            / travel;
         Some(ScrollGeometry { top, size, visible })
     }
 }

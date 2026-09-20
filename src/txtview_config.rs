@@ -33,9 +33,11 @@ pub struct TxtViewConfig {
     /// Show an interactive vertical scrollbar on the right edge. It can be
     /// clicked to jump to a position or dragged to scroll.
     pub show_scrollbar: bool,
-    /// Fixed viewport width in columns. `None` uses the terminal width.
+    /// Fixed viewport width in columns. `None` uses the terminal width. A
+    /// fixed width of 0 is lifted to 1 so nothing silently renders blank.
     pub viewport_width: Option<u16>,
-    /// Fixed viewport height in rows. `None` uses the terminal height.
+    /// Fixed viewport height in rows. `None` uses the terminal height. A fixed
+    /// height of 0 is lifted to 1 so nothing silently renders blank.
     pub viewport_height: Option<u16>,
 }
 
@@ -73,14 +75,16 @@ impl TxtViewConfig {
         self
     }
 
-    /// Set a fixed viewport width in columns. `None` uses the terminal width.
+    /// Set a fixed viewport width in columns. `None` uses the terminal width. A
+    /// fixed width of 0 is lifted to 1.
     #[must_use]
     pub fn with_viewport_width(mut self, width: Option<u16>) -> Self {
         self.viewport_width = width;
         self
     }
 
-    /// Set a fixed viewport height in rows. `None` uses the terminal height.
+    /// Set a fixed viewport height in rows. `None` uses the terminal height. A
+    /// fixed height of 0 is lifted to 1.
     #[must_use]
     pub fn with_viewport_height(mut self, height: Option<u16>) -> Self {
         self.viewport_height = height;

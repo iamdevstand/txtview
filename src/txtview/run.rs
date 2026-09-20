@@ -114,7 +114,7 @@ impl TxtView {
                                 last_page_up_jump = Instant::now();
                             }
                         }
-                        (KeyCode::Home, _) | (KeyCode::Char('g'), KeyModifiers::NONE) => {
+                        (KeyCode::Home, _) | (KeyCode::Char('g'), _) => {
                             let delta = self.jump_to_start();
                             self.apply_scroll(stdout, delta)?;
                         }

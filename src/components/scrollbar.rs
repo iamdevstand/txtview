@@ -59,9 +59,10 @@ impl ScrollGeometry {
 pub(crate) enum Orientation {
     /// Right-hand column of the box, spanning its rows.
     Vertical,
-    /// Bottom row of the box, spanning its columns.
+    /// Bottom row of the box, spanning its columns. Not yet offered by the
+    /// layout, so a horizontal bar is only ever built by the component tests;
+    /// kept as the planned next feature.
     #[allow(dead_code)]
-    // This is deliberately dead code i made during the rewrite since its probably gonna be a feature later
     Horizontal,
 }
 
@@ -413,6 +414,32 @@ mod tests {
                 } if grab_offset < 3 && target > 0
             ),
             "a press below the thumb must jump forward: {target:?}"
+        );
+    }
+
+    #[test]
+    fn horizontal_bar_answers_presses_along_its_track() {
+        let bar = ScrollBar::new(geometry(), Orientation::Horizontal, None);
+        let area = placed(&bar);
+        let press = bar
+            .press(area, (area.col, area.row), 100, Gesture::Press)
+            .expect("a horizontal track press must answer");
+        assert!(
+            matches!(press, Request::DragTo { target, .. } if target == 0),
+            "the pointer above the thumb must jump to the start: {press:?}"
+        );
+
+        let grabbed = ScrollBar::new(geometry(), Orientation::Horizontal, Some(1));
+        let drag = grabbed
+            .press(area, (area.col, area.row), 100, Gesture::Drag)
+            .expect("a grabbed horizontal bar must answer");
+        assert_eq!(
+            drag,
+            Request::DragTo {
+                target: 0,
+                grab_offset: 1
+            },
+            "grab at offset 1 over the track's first cell pins the thumb at the start"
         );
     }
 
