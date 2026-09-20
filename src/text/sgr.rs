@@ -58,7 +58,7 @@ const SGR_COLOR_RGB: u8 = 2;
 pub(super) struct SgrState {
     attrs: BTreeSet<u8>,
     font: Option<u8>,
-    other: BTreeSet<String>,
+    other: Vec<String>,
     fg: Option<String>,
     bg: Option<String>,
 }
@@ -152,12 +152,15 @@ impl SgrState {
                             self.bg = Some(slot);
                         }
                         i += 4;
-                    } else {
-                        self.other.insert(code.to_string());
                     }
+                    // A malformed extended color (a bare 38 or 48, or
+                    // sub-params that are neither 5 nor 2) is ignored
+                    // rather than replayed, so a lone `38` can never
+                    // corrupt the color that follows. Its leftover
+                    // parameters are still folded below
                 }
                 _ => {
-                    self.other.insert(params[i].to_string());
+                    self.push_other(params[i].to_string());
                 }
             }
             i += 1;
@@ -191,6 +194,15 @@ impl SgrState {
 
     fn clear(&mut self) {
         *self = Self::default();
+    }
+
+    /// Record an unknown code once, in the order it first appeared, so the
+    /// replayed sequence matches the original for terminals where the order
+    /// of these codes matters.
+    fn push_other(&mut self, code: String) {
+        if !self.other.contains(&code) {
+            self.other.push(code);
+        }
     }
 }
 
@@ -254,10 +266,30 @@ mod tests {
     }
 
     #[test]
-    fn unknown_codes_are_preserved_and_deduped() {
+    fn unknown_codes_keep_their_sequence_order_and_dedup() {
         assert_eq!(
-            state(&["\x1b[60m", "\x1b[60m"]),
-            Some("\x1b[60m".to_string())
+            state(&["\x1b[62m", "\x1b[60m"]),
+            Some("\x1b[62;60m".to_string())
+        );
+        assert_eq!(
+            state(&["\x1b[60m", "\x1b[62m", "\x1b[60m"]),
+            Some("\x1b[60;62m".to_string())
+        );
+    }
+
+    #[test]
+    fn malformed_extended_color_is_ignored_not_replayed() {
+        assert_eq!(state(&["\x1b[38m"]), None);
+        assert_eq!(state(&["\x1b[48m"]), None);
+        assert_eq!(
+            state(&["\x1b[38;5m"]),
+            Some("\x1b[5m".to_string()),
+            "a truncated extended color must not replay a bare 38"
+        );
+        assert_eq!(
+            state(&["\x1b[38;4;5m"]),
+            Some("\x1b[4;5m".to_string()),
+            "leftover parameters of a malformed extended color still fold"
         );
     }
 }

@@ -3,7 +3,7 @@ use std::io;
 use crossterm::{QueueableCommand, cursor::MoveTo};
 
 use crate::surface::{Area, Component};
-use crate::text::visual_len;
+use crate::text::write_visible_row;
 
 /// The scrollable text rows of the viewer.
 ///
@@ -39,11 +39,12 @@ impl Component for Content<'_> {
                 .unwrap_or("");
             let (col, row) = (area.col, area.row + i);
             QueueableCommand::queue(out, MoveTo(col, row))?;
-            write!(out, "{}", text)?;
-            // The row is wrapped to fit this area, pad its remainder with
-            // spaces so stale cells fade without ever writing past the area
-            // the content owns.
-            let pad = usize::from(area.width).saturating_sub(visual_len(text));
+            // Write the leading text that fits the area, skipping a trailing
+            // cluster wider than the area rather than splitting it, then pad
+            // the remainder with spaces so stale cells fade without ever
+            // writing past the cells the content owns
+            let used = write_visible_row(text, usize::from(area.width), out)?;
+            let pad = usize::from(area.width).saturating_sub(used);
             if pad > 0 {
                 write!(out, "{}", " ".repeat(pad))?;
             }
@@ -118,6 +119,20 @@ mod tests {
         assert!(out.is_empty(), "a zero-width area must not paint: {out:?}");
         let out = render(&["hidden"], 0, box_at(0, 0, 5, 0));
         assert!(out.is_empty(), "a zero-height area must not paint: {out:?}");
+    }
+
+    #[test]
+    fn clips_a_cluster_wider_than_the_area_whole() {
+        let out = render(&["🎉"], 0, box_at(0, 0, 1, 1));
+        assert_eq!(
+            out, "\x1b[1;1H ",
+            "a 2-wide emoji in a 1-column area must pad, not escape"
+        );
+        let out = render(&["ab🎉"], 0, box_at(0, 0, 3, 1));
+        assert_eq!(
+            out, "\x1b[1;1Hab ",
+            "the trailing cluster is clipped whole and the pad fills the edge"
+        );
     }
 
     fn box_height(rows: u16) -> Area {

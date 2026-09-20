@@ -15,7 +15,8 @@ const TAB_WIDTH: usize = 8;
 /// measured the way the wrapper lays rows out: a tab advances to its next
 /// 8-column stop, a control character takes its caret notation width, and
 /// anything else keeps its [`cluster_visual_width`]. Both the wrapper and
-/// [`visual_len`](super::visual_len) measure rows through this one function.
+/// [`write_visible_row`](super::write_visible_row) measure rows through this
+/// one function.
 pub(super) fn cluster_width_at(cluster: &str, col: usize) -> usize {
     let c = cluster.chars().next().unwrap_or('\u{fffd}');
     match c {
@@ -44,7 +45,9 @@ pub(super) fn cluster_width_at(cluster: &str, col: usize) -> usize {
 ///   one atomic unit so a wrap can never split it),
 /// - C0 and C1 controls, DEL, and every other escape become visible caret
 ///   notation,
-/// - tabs keep their literal byte and are wrapped at their 8-column stop.
+/// - tabs keep their literal byte and are wrapped at their 8-column stop and
+///   a tab whose stop lies beyond the wrap width renders as spaces filling
+///   the row so the row never exceeds the width.
 pub(crate) fn wrap_line_ansi(line: &str, width: usize, start_col: usize) -> Vec<String> {
     let width = width.max(1);
     let bytes = line.as_bytes();
@@ -55,53 +58,58 @@ pub(crate) fn wrap_line_ansi(line: &str, width: usize, start_col: usize) -> Vec<
 
     let mut i = 0;
     while i < bytes.len() {
-        let (piece, piece_width, next): (Cow<'_, str>, usize, usize) = if bytes[i] == 0x1b {
-            let (end, kind) = parse_escape(bytes, i);
-            let seq = &line[i..end];
-            match kind {
-                Esc::Sgr => {
-                    // SGR passes through raw so styling works and is folded
-                    // into the live state for re-emission after a wrap.
-                    style.apply(seq);
-                    (Cow::Borrowed(seq), 0, end)
+        let (piece, mut piece_width, is_tab, next): (Cow<'_, str>, usize, bool, usize) =
+            if bytes[i] == 0x1b {
+                let (end, kind) = parse_escape(bytes, i);
+                let seq = &line[i..end];
+                match kind {
+                    Esc::Sgr => {
+                        // SGR passes through raw so styling works and is folded
+                        // into the live state for re-emission after a wrap
+                        style.apply(seq);
+                        (Cow::Borrowed(seq), 0, false, end)
+                    }
+                    Esc::Osc8 => {
+                        // OSC8 hyperlinks pass through raw so they render as real
+                        // links, emitted as one atomic unit (opener, payload and
+                        // terminator together) so a wrap can never split them.
+                        // OSC bytes take zero terminal columns, so no width
+                        (Cow::Borrowed(seq), 0, false, end)
+                    }
+                    Esc::Visible => {
+                        // Any other escape (OSC titles, cursor moves, clears, CSI,
+                        // 2-byte) is shown as visible caret notation, like `less`.
+                        // It is emitted as one atomic unit: never executed, never
+                        // split across a wrap boundary
+                        let display = escape_display(seq);
+                        let width = display_width(&display);
+                        (Cow::Owned(display), width, false, end)
+                    }
                 }
-                Esc::Osc8 => {
-                    // OSC8 hyperlinks pass through raw so they render as real
-                    // links, emitted as one atomic unit (opener, payload and
-                    // terminator together) so a wrap can never split them.
-                    // OSC bytes take zero terminal columns, so no width.
-                    (Cow::Borrowed(seq), 0, end)
-                }
-                Esc::Visible => {
-                    // Any other escape (OSC titles, cursor moves, clears, CSI,
-                    // 2-byte) is shown as visible caret notation, like `less`.
-                    // It is emitted as one atomic unit: never executed, never
-                    // split across a wrap boundary.
-                    let display = escape_display(seq);
-                    let width = display_width(&display);
-                    (Cow::Owned(display), width, end)
-                }
-            }
-        } else {
-            // Process a full extended grapheme cluster together so a wrap can
-            // never split a base char from its combining marks, skin-tone
-            // modifiers, ZWJ sequences or flag pairs (issue #8).
-            let cluster = &line[i..].graphemes(true).next().unwrap_or_default();
-            let end = i + cluster.len();
-            let c = cluster.chars().next().unwrap_or('\u{fffd}');
-            // Map the character to the text placed in the chunk, neutralizing
-            // control bytes so they cannot corrupt the terminal:
-            // - tab keeps its literal byte (wrapped at its 8-column stop),
-            // - C0/C1 controls and DEL become visible caret notation.
-            let replacement: Cow<'_, str> = match c {
-                '\t' => Cow::Borrowed(cluster),
-                c if c.is_control() => Cow::Owned(caret_notation(c)),
-                _ => Cow::Borrowed(cluster),
+            } else {
+                // Process a full extended grapheme cluster together so a wrap can
+                // never split a base char from its combining marks, skin-tone
+                // modifiers, ZWJ sequences or flag pairs
+                let cluster = &line[i..].graphemes(true).next().unwrap_or_default();
+                let is_tab = *cluster == "\t";
+                let end = i + cluster.len();
+                let c = cluster.chars().next().unwrap_or('\u{fffd}');
+                // Map the character to the text placed in the chunk, neutralizing
+                // control bytes so they cannot corrupt the terminal:
+                // - tab keeps its literal byte (wrapped at its 8-column stop),
+                // - C0/C1 controls and DEL become visible caret notation.
+                let replacement: Cow<'_, str> = match c {
+                    '\t' => Cow::Borrowed(cluster),
+                    c if c.is_control() => Cow::Owned(caret_notation(c)),
+                    _ => Cow::Borrowed(cluster),
+                };
+                let ch_width = cluster_width_at(cluster, start_col + visible_width);
+                (replacement, ch_width, is_tab, end)
             };
-            let ch_width = cluster_width_at(cluster, start_col + visible_width);
-            (replacement, ch_width, end)
-        };
         i = next;
+        // Once a piece is moved to a fresh row its start column changes, so
+        // when a tab is the piece that wrapped its advance has to be measured
+        // again from that fresh row's first column
         if visible_width + piece_width > width && !current_chunk.is_empty() {
             let prefix = style.to_ansi();
             if prefix.is_some() {
@@ -113,9 +121,22 @@ pub(crate) fn wrap_line_ansi(line: &str, width: usize, start_col: usize) -> Vec<
             if let Some(prefix) = prefix {
                 current_chunk.push_str(&prefix);
             }
+            if is_tab {
+                piece_width = TAB_WIDTH - (start_col + visible_width) % TAB_WIDTH;
+            }
         }
-        current_chunk.push_str(&piece);
-        visible_width += piece_width;
+        if piece_width > width && is_tab {
+            // A tab whose stop lies beyond the whole row cannot reach it, so
+            // it renders as spaces filling the row and never pushes the
+            // cursor past the wrap width. Grapheme clusters stay whole even
+            // when wider than the width (they cannot be split), so only tabs
+            // get this substitution
+            current_chunk.push_str(&" ".repeat(width));
+            visible_width = width;
+        } else {
+            current_chunk.push_str(&piece);
+            visible_width += piece_width;
+        }
     }
 
     if !current_chunk.is_empty() {
@@ -288,7 +309,7 @@ mod tests {
     #[test]
     fn tab_overshoots_own_row_when_it_does_not_fit() {
         let chunks = wrap_line_ansi("a\tb", 5, 0);
-        assert_eq!(chunks, vec!["a", "\t", "b"]);
+        assert_eq!(chunks, vec!["a", "     ", "b"]);
     }
 
     #[test]
@@ -299,7 +320,7 @@ mod tests {
 
     #[test]
     fn tab_advance_accounts_for_prefix_column() {
-        assert_eq!(wrap_line_ansi("\tX", 5, 0), vec!["\t", "X"]);
+        assert_eq!(wrap_line_ansi("\tX", 5, 0), vec!["     ", "X"]);
         assert_eq!(wrap_line_ansi("\tX", 5, 5), vec!["\tX"]);
     }
 
@@ -317,7 +338,30 @@ mod tests {
 
     #[test]
     fn tab_at_line_end_and_following_wrap() {
-        assert_eq!(wrap_line_ansi("ab\tcd", 4, 0), vec!["ab", "\t", "cd"]);
+        assert_eq!(wrap_line_ansi("ab\tcd", 4, 0), vec!["ab", "    ", "cd"]);
+    }
+
+    #[test]
+    fn styled_tab_on_narrow_viewport_never_exceeds_the_width() {
+        let chunks = wrap_line_ansi("\x1b[31ma\tb\x1b[0m", 5, 0);
+        assert_eq!(
+            chunks,
+            vec![
+                "\x1b[31ma\x1b[0m",
+                "\x1b[31m     \x1b[0m",
+                "\x1b[31mb\x1b[0m"
+            ]
+        );
+    }
+
+    #[test]
+    fn emoji_wider_than_the_viewport_stays_whole() {
+        assert_eq!(
+            wrap_line_ansi("🎉", 1, 0),
+            vec!["🎉"],
+            "a grapheme wider than the viewport is never split or dropped"
+        );
+        assert_eq!(wrap_line_ansi("🎉\t🎉", 1, 0), vec!["🎉", " ", "🎉"]);
     }
 
     #[test]
