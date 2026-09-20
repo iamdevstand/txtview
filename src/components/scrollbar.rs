@@ -152,13 +152,15 @@ impl Component for ScrollBar {
                     });
                 }
                 let size = self.geometry.size.max(1);
+                // A track press grabs the thumb at the center it just used to
+                // aim, so a drag that never leaves the cell keeps it still.
                 let center = y.saturating_sub(size / 2);
                 let target = self
                     .geometry
                     .offset_from_thumb_top(i64::try_from(center).unwrap_or(i64::MAX), max_offset);
                 Some(Request::DragTo {
                     target,
-                    grab_offset: size.div_ceil(2).min(size - 1),
+                    grab_offset: size / 2,
                 })
             }
             Gesture::Drag => {
@@ -441,6 +443,50 @@ mod tests {
             },
             "grab at offset 1 over the track's first cell pins the thumb at the start"
         );
+    }
+
+    #[test]
+    fn stationary_drag_after_a_track_press_keeps_the_thumb_still() {
+        // A track press centers the thumb under the pointer and grabs it at
+        // that center, so a drag that never leaves the cell must not move the
+        // thumb again. The press and the drag have to agree on the offset for
+        // every thumb size, not just even ones (issue #13).
+        for size in 1..=5 {
+            let geometry = ScrollGeometry {
+                top: 0,
+                size,
+                visible: 10,
+            };
+            let bar = ScrollBar::new(geometry, Orientation::Vertical, None);
+            let area = placed(&bar);
+            let y = 7;
+            let (target, grab_offset) = match bar
+                .press(area, (area.col, y), 30, Gesture::Press)
+                .expect("a track press must answer")
+            {
+                Request::DragTo {
+                    target,
+                    grab_offset,
+                } => (target, grab_offset),
+                request => panic!("expected a drag request, got {request:?}"),
+            };
+            assert_eq!(
+                grab_offset,
+                size / 2,
+                "a track press grabs the thumb at its center"
+            );
+            let grabbed = ScrollBar::new(geometry, Orientation::Vertical, Some(grab_offset));
+            let drag = grabbed
+                .press(area, (area.col, y), 30, Gesture::Drag)
+                .expect("a grabbed bar must answer");
+            match drag {
+                Request::DragTo { target: t, .. } => assert_eq!(
+                    t, target,
+                    "a drag over the pressed cell must not move the thumb"
+                ),
+                request => panic!("expected a drag request, got {request:?}"),
+            }
+        }
     }
 
     #[test]
