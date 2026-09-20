@@ -23,10 +23,15 @@ pub(crate) use self::wrap::wrap_line_ansi;
 
 /// Write the leading part of a display row that fits in `width` terminal
 /// columns and return the columns written. SGR and OSC8 escapes pass through
-/// raw and take no width, every other escape is shown as caret notation, and
-/// grapheme clusters are never split: a cluster wide enough to cross the
-/// `width` edge (possible on a one-column viewport) is skipped whole so the
-/// row never paints past the area it owns (issue #12).
+/// raw and take no width, every other escape is shown as caret notation,
+/// tabs are written as the space run to their stop, and grapheme clusters
+/// are never split: a cluster wide enough to cross the `width` edge
+/// (possible on a one-column viewport) is skipped whole so the row never
+/// paints past the area it owns.
+///
+/// Tabs are never emitted as the literal byte: the terminal would advance
+/// without touching the gap cells, leaving stale glyphs from the previous
+/// frame there when the row scrolls.
 pub(crate) fn write_visible_row(
     text: &str,
     width: usize,
@@ -58,7 +63,11 @@ pub(crate) fn write_visible_row(
         if used + w > width {
             return Ok(used);
         }
-        write!(out, "{cluster}")?;
+        if *cluster == "\t" {
+            write!(out, "{}", " ".repeat(w))?;
+        } else {
+            write!(out, "{cluster}")?;
+        }
         used += w;
         i += cluster.len();
     }

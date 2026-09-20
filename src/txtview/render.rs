@@ -312,6 +312,56 @@ mod tests {
     }
 
     #[test]
+    fn tab_gap_is_repainted_after_a_scroll() {
+        let text = ["01234567", "ab\tcd", "01234567", "again"].join("\n");
+        let config = TxtViewConfig {
+            viewport_height: Some(2),
+            viewport_width: Some(8),
+            show_help_bar: false,
+            show_scrollbar: false,
+            ..TxtViewConfig::default()
+        };
+        let mut v = TxtView::new(&text).with_config(config);
+
+        let mut frame = Vec::new();
+        v.draw(&mut frame).unwrap();
+        let first = String::from_utf8_lossy(&frame);
+        assert_eq!(
+            first, "\x1b[1;1H01234567\x1b[2;1Hab      ",
+            "frame 1 must paint the tab gap as spaces: {first:?}"
+        );
+
+        v.scroll_down(1);
+        let mut frame = Vec::new();
+        v.draw(&mut frame).unwrap();
+        let second = String::from_utf8_lossy(&frame);
+        assert_eq!(
+            second, "\x1b[1;1Hab      \x1b[2;1Hcd      ",
+            "frame 2 must repaint the gap a literal tab byte would have skipped: {second:?}"
+        );
+    }
+
+    #[test]
+    fn tab_stop_lines_up_under_a_line_number_prefix() {
+        let config = TxtViewConfig {
+            viewport_height: Some(2),
+            viewport_width: Some(10),
+            show_line_numbers: true,
+            show_help_bar: false,
+            show_scrollbar: false,
+        };
+        let mut v = TxtView::new("ab\tcd\nef").with_config(config);
+
+        let mut out = Vec::new();
+        v.draw(&mut out).unwrap();
+        let s = String::from_utf8_lossy(&out);
+        assert_eq!(
+            s, "\x1b[1;1H1 │ ab  cd\x1b[2;1H2 │ ef    ",
+            "the tab must reach the same stop the wrap measured under the prefix: {s:?}"
+        );
+    }
+
+    #[test]
     fn resize_during_drag_keeps_the_grab_consistent() {
         let mut v = scrolling_viewer(100, 20, 40);
         assert!(v.scrollbar_active, "fixture must overflow");

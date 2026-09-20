@@ -450,7 +450,7 @@ mod tests {
         // A track press centers the thumb under the pointer and grabs it at
         // that center, so a drag that never leaves the cell must not move the
         // thumb again. The press and the drag have to agree on the offset for
-        // every thumb size, not just even ones (issue #13).
+        // every thumb size, not just even ones.
         for size in 1..=5 {
             let geometry = ScrollGeometry {
                 top: 0,

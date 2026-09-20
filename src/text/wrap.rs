@@ -45,9 +45,12 @@ pub(super) fn cluster_width_at(cluster: &str, col: usize) -> usize {
 ///   one atomic unit so a wrap can never split it),
 /// - C0 and C1 controls, DEL, and every other escape become visible caret
 ///   notation,
-/// - tabs keep their literal byte and are wrapped at their 8-column stop and
-///   a tab whose stop lies beyond the wrap width renders as spaces filling
-///   the row so the row never exceeds the width.
+/// - tabs stay as literal bytes in the wrapped row, measured at their
+///   8-column stop, a tab whose stop lies beyond the wrap width renders as
+///   spaces filling the row so the row never exceeds the width. The display
+///   rows can therefore contain literal tabs, the write layer expands them
+///   to spaces, so a tab byte itself never reaches the terminal
+///   ([`write_visible_row`](super::write_visible_row)).
 pub(crate) fn wrap_line_ansi(line: &str, width: usize, start_col: usize) -> Vec<String> {
     let width = width.max(1);
     let bytes = line.as_bytes();
@@ -96,7 +99,8 @@ pub(crate) fn wrap_line_ansi(line: &str, width: usize, start_col: usize) -> Vec<
                 let c = cluster.chars().next().unwrap_or('\u{fffd}');
                 // Map the character to the text placed in the chunk, neutralizing
                 // control bytes so they cannot corrupt the terminal:
-                // - tab keeps its literal byte (wrapped at its 8-column stop),
+                // - tab keeps its literal byte in the display row (wrapped at
+                //   its 8-column stop, the write layer expands it to spaces),
                 // - C0/C1 controls and DEL become visible caret notation.
                 let replacement: Cow<'_, str> = match c {
                     '\t' => Cow::Borrowed(cluster),

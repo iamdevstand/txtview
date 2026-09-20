@@ -135,6 +135,33 @@ mod tests {
         );
     }
 
+    #[test]
+    fn tab_gap_cells_are_painted_as_spaces() {
+        let out = render(&["a\t"], 0, box_at(0, 0, 8, 1));
+        assert_eq!(
+            out, "\x1b[1;1Ha       ",
+            "the tab is written as its space run so no cell is left stale: {out:?}"
+        );
+    }
+
+    #[test]
+    fn lone_tab_clears_the_whole_row() {
+        let out = render(&["\t"], 0, box_at(0, 0, 8, 1));
+        assert_eq!(
+            out, "\x1b[1;1H        ",
+            "a lone tab must fill all eight stop cells with spaces: {out:?}"
+        );
+    }
+
+    #[test]
+    fn tab_beyond_the_area_edge_is_clipped_and_padded() {
+        let out = render(&["a\t"], 0, box_at(0, 0, 4, 1));
+        assert_eq!(
+            out, "\x1b[1;1Ha   ",
+            "a tab that cannot reach its stop is clipped whole and the pad fills: {out:?}"
+        );
+    }
+
     fn box_height(rows: u16) -> Area {
         Area {
             col: 0,
