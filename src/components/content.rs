@@ -39,7 +39,7 @@ impl Component for Content<'_> {
                 .unwrap_or("");
             let (col, row) = (area.col, area.row + i);
             QueueableCommand::queue(out, MoveTo(col, row))?;
-            write!(out, "{text}")?;
+            write!(out, "{}", text)?;
             // The row is wrapped to fit this area, pad its remainder with
             // spaces so stale cells fade without ever writing past the area
             // the content owns.
