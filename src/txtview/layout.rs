@@ -45,12 +45,25 @@ impl TxtView {
         "q: quit | ↑/↓, j/k, Mouse: scroll | PgUp/PgDn: page | Home/End, g/G: start/end".to_string()
     }
 
+    /// The wrapped rows of the help text, produced the same way the content
+    /// rows are: one `wrap_line_ansi` over the viewport width, so the help
+    /// bar and the content share a single wrapping routine and geometry. The
+    /// bar spans the full viewport width (its row runs under the scrollbar's
+    /// column too), so it wraps at `content_cols`, not at the content's
+    /// narrower `avail`.
+    pub(super) fn help_rows(&self) -> Vec<String> {
+        wrap_line_ansi(
+            &Self::help_text(),
+            usize::from(self.content_cols()).max(1),
+            0,
+        )
+    }
+
     fn help_height(&self) -> u16 {
         if !self.config.show_help_bar {
             return 0;
         }
-        HelpBar::new(Self::help_text())
-            .height(usize::from(self.resolved_width()), self.resolved_height())
+        HelpBar::new(self.help_rows()).height(self.resolved_height())
     }
 
     /// The columns the viewport spans: the resolved width, before the
