@@ -36,6 +36,8 @@ const SGR_BG_MIN: u8 = 40;
 const SGR_BG_MAX: u8 = 47;
 const SGR_EXTENDED_BG: u8 = 48;
 const SGR_DEFAULT_BG: u8 = 49;
+const SGR_EXTENDED_UNDERLINE_COLOR: u8 = 58;
+const SGR_DEFAULT_UNDERLINE_COLOR: u8 = 59;
 const SGR_FRAME: u8 = 51;
 const SGR_CIRCLE: u8 = 52;
 const SGR_OVERLINE: u8 = 53;
@@ -47,6 +49,37 @@ const SGR_BRIGHT_BG_MIN: u8 = 100;
 const SGR_BRIGHT_BG_MAX: u8 = 107;
 const SGR_COLOR_INDEXED: u8 = 5;
 const SGR_COLOR_RGB: u8 = 2;
+
+/// One SGR parameter slot. Parameters are decimal, but ISO 8613-6 colon
+/// forms and doubled separators leave empty slots, for example the
+/// color-space slot in `38:2::220:0:0`, which stay distinct here so the
+/// extended-color cursors can skip them instead of folding them as zeroes.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Param {
+    Num(u8),
+    Empty,
+}
+
+impl Param {
+    /// Parse one raw separator-delimited field; malformed bytes stay dropped
+    /// just as the old `u8` parse dropped them.
+    fn parse(field: &str) -> Option<Param> {
+        if field.is_empty() {
+            Some(Param::Empty)
+        } else {
+            field.parse::<u8>().ok().map(Param::Num)
+        }
+    }
+
+    /// The numeric value a parameter contributes to a color: `0` for an
+    /// empty slot, per the ECMA-48 implicit-default rule.
+    fn value(self) -> String {
+        match self {
+            Param::Num(n) => n.to_string(),
+            Param::Empty => "0".to_string(),
+        }
+    }
+}
 
 /// Live styling state folded from the SGR codes seen so far.
 ///
@@ -61,6 +94,7 @@ pub(super) struct SgrState {
     other: Vec<String>,
     fg: Option<String>,
     bg: Option<String>,
+    ulcolor: Option<String>,
 }
 
 impl SgrState {
@@ -70,25 +104,54 @@ impl SgrState {
         let Some(inner) = inner else {
             return;
         };
-        let params: Vec<u8> = inner
-            .split(';')
-            .filter_map(|p| p.parse::<u8>().ok())
-            .collect();
-        if params.is_empty() {
+        // Split parameters on `;` or `:` (ISO 8613-6 colon forms separate
+        // parameters with colons too), keeping empty slots so a colon-form
+        // color like `38:2::220:0:0` keeps its color-space position. The
+        // separator that precedes each slot is remembered because a colon
+        // form paints a different meaning onto the extended-color fields
+        let mut params: Vec<Param> = Vec::new();
+        let mut sep_colon: Vec<bool> = Vec::new();
+        let mut start = 0;
+        let mut pending_colon = false;
+        for (idx, ch) in inner.char_indices() {
+            if ch == ';' || ch == ':' {
+                if let Some(p) = Param::parse(&inner[start..idx]) {
+                    params.push(p);
+                    sep_colon.push(pending_colon);
+                }
+                start = idx + 1;
+                pending_colon = ch == ':';
+            }
+        }
+        if let Some(p) = Param::parse(&inner[start..]) {
+            params.push(p);
+            sep_colon.push(pending_colon);
+        }
+        if params.is_empty() || params.iter().all(|&p| p == Param::Empty) {
             self.clear();
             return;
         }
         let mut i = 0;
         while i < params.len() {
-            match params[i] {
+            let code = match params[i] {
+                Param::Num(code) => code,
+                Param::Empty => {
+                    // A doubled separator is an implicit default parameter,
+                    // which ECMA-48 defines as 0 (full reset).
+                    self.clear();
+                    i += 1;
+                    continue;
+                }
+            };
+            match code {
                 SGR_RESET => self.clear(),
                 SGR_BOLD | SGR_DIM | SGR_ITALIC | SGR_UNDERLINE | SGR_BLINK | SGR_RAPID_BLINK
                 | SGR_REVERSE | SGR_CONCEAL | SGR_STRIKE | SGR_DOUBLE_UNDERLINE | SGR_FRAME
                 | SGR_CIRCLE | SGR_OVERLINE => {
-                    self.attrs.insert(params[i]);
+                    self.attrs.insert(code);
                 }
                 SGR_DEFAULT_FONT => self.font = None,
-                SGR_ALT_FONT_MIN..=SGR_ALT_FONT_MAX => self.font = Some(params[i]),
+                SGR_ALT_FONT_MIN..=SGR_ALT_FONT_MAX => self.font = Some(code),
                 SGR_OFF_BOLD_DIM => {
                     self.attrs.remove(&SGR_BOLD);
                     self.attrs.remove(&SGR_DIM);
@@ -121,49 +184,65 @@ impl SgrState {
                     self.attrs.remove(&SGR_OVERLINE);
                 }
                 SGR_FG_MIN..=SGR_FG_MAX | SGR_BRIGHT_FG_MIN..=SGR_BRIGHT_FG_MAX => {
-                    self.fg = Some(params[i].to_string());
+                    self.fg = Some(code.to_string());
                 }
                 SGR_DEFAULT_FG => self.fg = None,
                 SGR_BG_MIN..=SGR_BG_MAX | SGR_BRIGHT_BG_MIN..=SGR_BRIGHT_BG_MAX => {
-                    self.bg = Some(params[i].to_string());
+                    self.bg = Some(code.to_string());
                 }
                 SGR_DEFAULT_BG => self.bg = None,
-                SGR_EXTENDED_FG | SGR_EXTENDED_BG => {
-                    let code = params[i];
-                    if i + 2 < params.len() && params[i + 1] == SGR_COLOR_INDEXED {
-                        let slot = format!("{code};{};{}", SGR_COLOR_INDEXED, params[i + 2]);
-                        if code == SGR_EXTENDED_FG {
-                            self.fg = Some(slot);
-                        } else {
-                            self.bg = Some(slot);
+                SGR_DEFAULT_UNDERLINE_COLOR => self.ulcolor = None,
+                SGR_EXTENDED_FG | SGR_EXTENDED_BG | SGR_EXTENDED_UNDERLINE_COLOR => {
+                    let paramlen = params.len();
+                    if paramlen > i + 2 && params[i + 1] == Param::Num(SGR_COLOR_INDEXED) {
+                        if let Param::Num(n) = params[i + 2] {
+                            let slot = format!("{code};{};{}", SGR_COLOR_INDEXED, n);
+                            self.set_color(code, slot);
+                            i += 2;
                         }
-                        i += 2;
-                    } else if i + 4 < params.len() && params[i + 1] == SGR_COLOR_RGB {
+                    } else if paramlen > i + 4 && params[i + 1] == Param::Num(SGR_COLOR_RGB) {
+                        // A colon form may carry an optional color-space slot
+                        // between the mode and the RGB triplet
+                        // (`38:2:cs:r:g:b`, `38:2::r:g:b`); when the color was
+                        // entered with colors the list is long enough that the
+                        // extra slot exists and is dropped. Semicolon forms
+                        // never have it, so a trailing `;31`-style parameter
+                        // keeps folding as its own SGR code below
+                        let colon_form = sep_colon[i + 1];
+                        let has_cs = colon_form && paramlen > i + 5;
+                        let r = i + if has_cs { 3 } else { 2 };
                         let slot = format!(
                             "{code};{};{};{};{}",
                             SGR_COLOR_RGB,
-                            params[i + 2],
-                            params[i + 3],
-                            params[i + 4]
+                            params[r].value(),
+                            params[r + 1].value(),
+                            params[r + 2].value()
                         );
-                        if code == SGR_EXTENDED_FG {
-                            self.fg = Some(slot);
-                        } else {
-                            self.bg = Some(slot);
-                        }
-                        i += 4;
+                        self.set_color(code, slot);
+                        i += if has_cs { 5 } else { 4 };
                     }
-                    // A malformed extended color (a bare 38 or 48, or
+                    // A malformed extended color (a bare 38, 48, 58 or
                     // sub-params that are neither 5 nor 2) is ignored
                     // rather than replayed, so a lone `38` can never
                     // corrupt the color that follows. Its leftover
                     // parameters are still folded below
                 }
                 _ => {
-                    self.push_other(params[i].to_string());
+                    self.push_other(code.to_string());
                 }
             }
             i += 1;
+        }
+    }
+
+    /// Store a folded extended color slot in the field owned by `code`.
+    fn set_color(&mut self, code: u8, slot: String) {
+        if code == SGR_EXTENDED_FG {
+            self.fg = Some(slot);
+        } else if code == SGR_EXTENDED_BG {
+            self.bg = Some(slot);
+        } else {
+            self.ulcolor = Some(slot);
         }
     }
 
@@ -185,6 +264,9 @@ impl SgrState {
         }
         if let Some(b) = &self.bg {
             codes.push(b.clone());
+        }
+        if let Some(u) = &self.ulcolor {
+            codes.push(u.clone());
         }
         if codes.is_empty() {
             return None;
@@ -291,5 +373,56 @@ mod tests {
             Some("\x1b[4;5m".to_string()),
             "leftover parameters of a malformed extended color still fold"
         );
+    }
+
+    #[test]
+    fn colon_form_rgb_sets_the_same_color() {
+        assert_eq!(
+            state(&["\x1b[38:2::220:0:0m"]),
+            Some("\x1b[38;2;220;0;0m".to_string())
+        );
+        assert_eq!(
+            state(&["\x1b[38:2:0:220:0:0m"]),
+            Some("\x1b[38;2;220;0;0m".to_string())
+        );
+        assert_eq!(
+            state(&["\x1b[48:2::0:255:0m"]),
+            Some("\x1b[48;2;0;255;0m".to_string())
+        );
+    }
+
+    #[test]
+    fn colon_form_indexed_color_folds() {
+        assert_eq!(
+            state(&["\x1b[38:5:123m"]),
+            Some("\x1b[38;5;123m".to_string())
+        );
+    }
+
+    #[test]
+    fn underline_color_folds_like_fg_bg() {
+        assert_eq!(
+            state(&["\x1b[58;5;10m"]),
+            Some("\x1b[58;5;10m".to_string()),
+            "a naked underline-color code must not leak a bare blink parameter"
+        );
+        assert_eq!(
+            state(&["\x1b[58:2::10:20:30m"]),
+            Some("\x1b[58;2;10;20;30m".to_string())
+        );
+    }
+
+    #[test]
+    fn trailing_param_after_semicolon_rgb_stays_its_own_code() {
+        assert_eq!(
+            state(&["\x1b[38;2;10;20;30;31m"]),
+            Some("\x1b[31m".to_string()),
+            "a semicolon form never swallows a trailing code into a color space"
+        );
+    }
+
+    #[test]
+    fn default_underline_color_clears_underline_color() {
+        assert_eq!(state(&["\x1b[58;5;10m", "\x1b[59m"]), None);
     }
 }
