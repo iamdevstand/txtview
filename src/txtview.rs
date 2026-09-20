@@ -35,10 +35,6 @@ pub struct TxtView {
     drag_grab_offset: Option<usize>,
     scrollbar_active: bool,
     display_geometry: Option<LayoutGeometry>,
-    #[cfg(test)]
-    rebuild_count: usize,
-    #[cfg(test)]
-    wrap_passes: usize,
 }
 
 impl TxtView {
@@ -68,10 +64,6 @@ impl TxtView {
             drag_grab_offset: None,
             scrollbar_active: false,
             display_geometry: None,
-            #[cfg(test)]
-            rebuild_count: 0,
-            #[cfg(test)]
-            wrap_passes: 0,
         };
         view.refresh_bounds();
         view
@@ -116,5 +108,41 @@ impl TxtView {
     /// ```
     pub fn config(&self) -> &TxtViewConfig {
         &self.config
+    }
+}
+
+#[cfg(test)]
+mod test_metrics {
+    //! Counting of display rebuilds and wrap passes. Test-only, so the
+    //! production struct carries no instrumentation. Each test gets its own
+    //! thread, so a thread-local counter is per-test: exact equality
+    //! assertions cannot observe other tests rebuilding.
+
+    use std::cell::Cell;
+
+    thread_local! {
+        static REBUILDS: Cell<usize> = const { Cell::new(0) };
+        static WRAPS: Cell<usize> = const { Cell::new(0) };
+    }
+
+    pub(crate) fn reset() {
+        REBUILDS.with(|c| c.set(0));
+        WRAPS.with(|c| c.set(0));
+    }
+
+    pub(crate) fn bump_rebuild() {
+        REBUILDS.with(|c| c.set(c.get() + 1));
+    }
+
+    pub(crate) fn bump_wrap() {
+        WRAPS.with(|c| c.set(c.get() + 1));
+    }
+
+    pub(crate) fn rebuilds() -> usize {
+        REBUILDS.with(Cell::get)
+    }
+
+    pub(crate) fn wraps() -> usize {
+        WRAPS.with(Cell::get)
     }
 }

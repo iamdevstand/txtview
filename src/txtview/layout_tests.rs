@@ -2,12 +2,14 @@
 //! and scroll-bounds behavior exercised through the full [TxtView].
 //!
 //! These live in a sibling module under `txtview` so they can read the
-//! viewer's private fields (`display`, `offset`, `max_offset`,
-//! `rebuild_count`, `wrap_passes`).
+//! viewer's private fields (`display`, `offset`, `max_offset`) and via
+//! `super::test_metrics`, the rebuild and wrap counters the production
+//! struct itself does not carry.
 
 use crate::TxtViewConfig;
 
 use super::TxtView;
+use super::test_metrics::{rebuilds, reset, wraps};
 
 fn viewer(input: &str, width: u16) -> TxtView {
     let config = TxtViewConfig {
@@ -143,18 +145,16 @@ fn scrollbar_column_released_when_config_turned_off() {
 
 #[test]
 fn offset_only_scroll_skips_display_rebuild() {
+    reset();
     let input = (0..100)
         .map(|i| format!("line {i}"))
         .collect::<Vec<_>>()
         .join("\n");
     let mut v = viewer(&input, 10);
-    let built = v.rebuild_count;
+    let built = rebuilds();
     v.scroll_down(50);
     v.refresh_bounds();
-    assert_eq!(
-        v.rebuild_count, built,
-        "scroll re-wrapped the whole document"
-    );
+    assert_eq!(rebuilds(), built, "scroll re-wrapped the whole document");
     assert_eq!(v.offset, 50);
 }
 
@@ -200,6 +200,7 @@ fn visible_rows_unchanged_when_help_fits() {
 
 #[test]
 fn width_change_rebuilds_display() {
+    reset();
     let config = |w| TxtViewConfig {
         show_help_bar: false,
         show_scrollbar: false,
@@ -207,14 +208,16 @@ fn width_change_rebuilds_display() {
         viewport_height: Some(10),
         ..TxtViewConfig::default()
     };
-    let mut v = TxtView::new("abcdefghij").with_config(config(10));
-    let n = v.rebuild_count;
-    v = v.with_config(config(5));
-    assert!(v.rebuild_count > n, "width change must re-wrap");
+    let v = TxtView::new("abcdefghij").with_config(config(10));
+    let n = rebuilds();
+    let v = v.with_config(config(5));
+    assert!(rebuilds() > n, "width change must re-wrap");
+    assert_eq!(v.display, vec!["abcde", "fghij"]);
 }
 
 #[test]
 fn height_change_reuses_display() {
+    reset();
     let config = |h| TxtViewConfig {
         show_help_bar: false,
         viewport_width: Some(80),
@@ -226,10 +229,10 @@ fn height_change_reuses_display() {
         .collect::<Vec<_>>()
         .join("\n");
     let mut v = TxtView::new(input).with_config(config(10));
-    let n = v.rebuild_count;
+    let n = rebuilds();
     let m0 = v.max_offset;
     v = v.with_config(config(20));
-    assert_eq!(v.rebuild_count, n, "height change must not re-wrap");
+    assert_eq!(rebuilds(), n, "height change must not re-wrap");
     assert!(v.max_offset < m0);
 }
 
@@ -386,28 +389,32 @@ fn thumb_capped_so_a_bare_overflow_keeps_travel_room() {
 
 #[test]
 fn overflow_reserves_column_only_after_one_wrap() {
+    reset();
     let v = scrolling_viewer(100);
     assert!(v.scrollbar_active, "fixture must overflow");
-    assert!(v.rebuild_count >= 1, "construction must have rebuilt");
+    assert!(rebuilds() >= 1, "construction must have rebuilt");
     assert_eq!(
-        v.wrap_passes, v.rebuild_count,
+        wraps(),
+        rebuilds(),
         "an overflowing document must be wrapped once per rebuild: the \
          scrollbar column is reserved before wrapping, so no re-wrap is needed \
          to carve it out (wrapped {} times for {} rebuilds)",
-        v.wrap_passes, v.rebuild_count,
+        wraps(),
+        rebuilds(),
     );
 }
 
 #[test]
 fn fitting_document_releases_the_reserved_column() {
+    reset();
     let v = scrolling_viewer(5);
     assert!(
         !v.scrollbar_active,
         "a fitting document must not keep a bar"
     );
     assert_eq!(
-        v.wrap_passes - v.rebuild_count,
-        v.rebuild_count,
+        wraps() - rebuilds(),
+        rebuilds(),
         "the release re-wrap costs one extra pass per rebuild, on a document \
          small enough that the reserved-width wrap only just fit"
     );

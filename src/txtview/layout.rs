@@ -135,7 +135,7 @@ impl TxtView {
     fn rebuild_display(&mut self) {
         #[cfg(test)]
         {
-            self.rebuild_count += 1;
+            super::test_metrics::bump_rebuild();
         }
         self.scrollbar_active = self.config.show_scrollbar;
         let geometry = self.layout_geometry();
@@ -154,7 +154,7 @@ impl TxtView {
     fn wrap_once(&mut self, geometry: LayoutGeometry) {
         #[cfg(test)]
         {
-            self.wrap_passes += 1;
+            super::test_metrics::bump_wrap();
         }
         self.display = self.build_display(geometry);
     }
