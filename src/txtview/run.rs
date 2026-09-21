@@ -91,16 +91,16 @@ impl TxtView {
             match event::read()? {
                 Event::Key(key) if key.kind == event::KeyEventKind::Press => {
                     match (key.code, key.modifiers) {
-                        (KeyCode::Char('q'), _)
+                        (KeyCode::Char('q'), KeyModifiers::NONE)
                         | (KeyCode::Char('c'), KeyModifiers::CONTROL)
                         | (KeyCode::Esc, _) => {
                             break;
                         }
-                        (KeyCode::Down, _) | (KeyCode::Char('j'), _) => {
+                        (KeyCode::Down, _) | (KeyCode::Char('j'), KeyModifiers::NONE) => {
                             let delta = self.scroll_down(1);
                             self.apply_scroll(stdout, delta)?;
                         }
-                        (KeyCode::Up, _) | (KeyCode::Char('k'), _) => {
+                        (KeyCode::Up, _) | (KeyCode::Char('k'), KeyModifiers::NONE) => {
                             let delta = self.scroll_up(1);
                             self.apply_scroll(stdout, delta)?;
                         }
@@ -118,11 +118,11 @@ impl TxtView {
                                 last_page_up_jump = Instant::now();
                             }
                         }
-                        (KeyCode::Home, _) | (KeyCode::Char('g'), _) => {
+                        (KeyCode::Home, _) | (KeyCode::Char('g'), KeyModifiers::NONE) => {
                             let delta = self.jump_to_start();
                             self.apply_scroll(stdout, delta)?;
                         }
-                        (KeyCode::End, _) | (KeyCode::Char('G'), _) => {
+                        (KeyCode::End, _) | (KeyCode::Char('G'), KeyModifiers::SHIFT) => {
                             let delta = self.jump_to_end();
                             self.apply_scroll(stdout, delta)?;
                         }
