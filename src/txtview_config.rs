@@ -34,10 +34,14 @@ pub struct TxtViewConfig {
     /// clicked to jump to a position or dragged to scroll.
     pub show_scrollbar: bool,
     /// Fixed viewport width in columns. `None` uses the terminal width. A
-    /// fixed width of 0 is lifted to 1 so nothing silently renders blank.
+    /// fixed width wider than the terminal is clamped to it, the way the
+    /// height is, so writes can never pass the terminal edge. A fixed width
+    /// of 0 is lifted to 1 so nothing silently renders blank.
     pub viewport_width: Option<u16>,
-    /// Fixed viewport height in rows. `None` uses the terminal height. A fixed
-    /// height of 0 is lifted to 1 so nothing silently renders blank.
+    /// Fixed viewport height in rows. `None` uses the terminal height. A
+    /// fixed height taller than the terminal is clamped to it, so a viewer
+    /// larger than the screen still fits. A fixed height of 0 is lifted to
+    /// 1 so nothing silently renders blank.
     pub viewport_height: Option<u16>,
 }
 
@@ -75,16 +79,16 @@ impl TxtViewConfig {
         self
     }
 
-    /// Set a fixed viewport width in columns. `None` uses the terminal width. A
-    /// fixed width of 0 is lifted to 1.
+    /// Set a fixed viewport width in columns. `None` uses the terminal width,
+    /// and a width beyond it is clamped down to it.
     #[must_use]
     pub fn with_viewport_width(mut self, width: Option<u16>) -> Self {
         self.viewport_width = width;
         self
     }
 
-    /// Set a fixed viewport height in rows. `None` uses the terminal height. A
-    /// fixed height of 0 is lifted to 1.
+    /// Set a fixed viewport height in rows. `None` uses the terminal height,
+    /// and a height beyond it is clamped down to it.
     #[must_use]
     pub fn with_viewport_height(mut self, height: Option<u16>) -> Self {
         self.viewport_height = height;
