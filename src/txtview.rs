@@ -5,6 +5,8 @@ mod navigation;
 mod render;
 mod run;
 
+use std::fmt;
+
 use crate::TxtViewConfig;
 
 use layout::LayoutGeometry;
@@ -25,7 +27,7 @@ use layout::LayoutGeometry;
 /// pass through, and the active style is re-emitted compactly when a styled
 /// line wraps. Control bytes and other escape sequences are shown as visible
 /// caret notation. See [`TxtViewConfig`] for the available display options.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct TxtView {
     lines: Vec<String>,
     display: Vec<String>,
@@ -35,6 +37,22 @@ pub struct TxtView {
     drag_grab_offset: Option<usize>,
     scrollbar_active: bool,
     display_geometry: Option<LayoutGeometry>,
+}
+
+impl fmt::Debug for TxtView {
+    /// Describe the viewer without dumping its contents: the document can be
+    /// huge, and the wrapped `display` rows mirror it. Only counts and the
+    /// scroll state are shown.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TxtView")
+            .field("line_count", &self.lines.len())
+            .field("display_rows", &self.display.len())
+            .field("offset", &self.offset)
+            .field("max_offset", &self.max_offset)
+            .field("scrollbar_active", &self.scrollbar_active)
+            .field("config", &self.config)
+            .finish()
+    }
 }
 
 impl TxtView {
@@ -108,6 +126,26 @@ impl TxtView {
     /// ```
     pub fn config(&self) -> &TxtViewConfig {
         &self.config
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn debug_reports_counts_instead_of_the_document() {
+        let viewer = TxtView::new("alpha\nbeta\ngamma");
+        let out = format!("{viewer:?}");
+        assert!(
+            out.contains("line_count: 3"),
+            "must report the line count: {out}"
+        );
+        assert!(
+            out.contains("display_rows:"),
+            "must report the wrapped rows: {out}"
+        );
+        assert!(!out.contains("alpha"), "must not dump the document: {out}");
     }
 }
 
