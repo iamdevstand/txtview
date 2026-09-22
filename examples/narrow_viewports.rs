@@ -20,13 +20,15 @@ fn main() -> std::io::Result<()> {
         "Wide emoji still wrap whole and keep double width:",
         "abcde🎉f",
         "",
+        "The default help bar hides itself on a box this narrow:",
+        "vs. it fits and shows on the wide terminal you are reading this on",
+        "",
     ]
     .join("\n");
 
     let config = TxtViewConfig {
         viewport_width: Some(6),
         viewport_height: Some(10),
-        show_help_bar: false,
         show_scrollbar: false,
         ..TxtViewConfig::default()
     };

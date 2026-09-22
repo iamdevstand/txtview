@@ -159,7 +159,7 @@ fn offset_only_scroll_skips_display_rebuild() {
 }
 
 #[test]
-fn visible_rows_keeps_one_row_on_narrow_width() {
+fn visible_rows_keep_the_whole_viewport_when_help_cannot_fit() {
     let config = TxtViewConfig {
         show_help_bar: true,
         show_scrollbar: false,
@@ -168,11 +168,11 @@ fn visible_rows_keeps_one_row_on_narrow_width() {
         ..TxtViewConfig::default()
     };
     let v = TxtView::new("hello\nworld").with_config(config);
-    assert_eq!(v.visible_rows(), 1);
+    assert_eq!(v.visible_rows(), 24);
 }
 
 #[test]
-fn visible_rows_keeps_one_row_on_tiny_terminal() {
+fn visible_rows_span_a_tiny_terminal_without_help() {
     let config = TxtViewConfig {
         show_help_bar: true,
         show_scrollbar: false,
@@ -181,7 +181,7 @@ fn visible_rows_keeps_one_row_on_tiny_terminal() {
         ..TxtViewConfig::default()
     };
     let v = TxtView::new("hello\nworld").with_config(config);
-    assert_eq!(v.visible_rows(), 1);
+    assert_eq!(v.visible_rows(), 2);
 }
 
 #[test]
