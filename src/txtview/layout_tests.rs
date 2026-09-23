@@ -346,7 +346,7 @@ fn scrollbar_hidden_when_track_cannot_host_thumb_and_travel() {
             viewport_height: Some(height),
             ..TxtViewConfig::default()
         };
-let v = TxtView::new(scratch_lines(100)).with_config(config);
+        let v = TxtView::new(scratch_lines(100)).with_config(config);
         assert!(
             !v.scrollbar_active,
             "a {height}-row viewport cannot host a thumb plus travel"
