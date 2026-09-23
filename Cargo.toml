@@ -1,6 +1,6 @@
 [package]
 name = "txtview"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2024"
 rust-version = "1.85"
 description = "A lightweight terminal text viewer with scrolling, wrapping, line numbers, and an optional interactive scrollbar"
