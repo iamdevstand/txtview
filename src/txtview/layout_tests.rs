@@ -346,7 +346,7 @@ fn scrollbar_hidden_when_track_cannot_host_thumb_and_travel() {
             viewport_height: Some(height),
             ..TxtViewConfig::default()
         };
-        let v = TxtView::new(&scratch_lines(100)).with_config(config);
+let v = TxtView::new(scratch_lines(100)).with_config(config);
         assert!(
             !v.scrollbar_active,
             "a {height}-row viewport cannot host a thumb plus travel"
@@ -367,7 +367,7 @@ fn thumb_capped_so_a_bare_overflow_keeps_travel_room() {
         viewport_height: Some(10),
         ..TxtViewConfig::default()
     };
-    let v = TxtView::new(&scratch_lines(11)).with_config(config.clone());
+    let v = TxtView::new(scratch_lines(11)).with_config(config.clone());
     let geometry = v
         .scroll_geometry()
         .expect("11 rows over 10 must stay usable");
@@ -377,7 +377,7 @@ fn thumb_capped_so_a_bare_overflow_keeps_travel_room() {
         "the 11-over-10 thumb must give up cells to keep MIN_TRAVEL of travel"
     );
 
-    let v = TxtView::new(&scratch_lines(100)).with_config(config);
+    let v = TxtView::new(scratch_lines(100)).with_config(config);
     let geometry = v
         .scroll_geometry()
         .expect("a tall document must keep the smallest thumb");

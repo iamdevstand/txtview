@@ -1,0 +1,6 @@
+msrv = "1.85"
+
+disallowed-methods = [
+    { path = "std::process::exit", reason = "skips the terminal-restore Drop guard" },
+    { path = "std::process::abort", reason = "skips the terminal-restore Drop guard" },
+]

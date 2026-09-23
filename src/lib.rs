@@ -1,4 +1,10 @@
 #![warn(missing_docs)]
+#![cfg_attr(
+    not(test),
+    deny(clippy::expect_used, clippy::panic, clippy::unwrap_used)
+)]
+#![deny(clippy::disallowed_methods, clippy::print_stderr, clippy::print_stdout)]
+#![warn(clippy::cast_possible_truncation, clippy::missing_errors_doc)]
 //! A minimal, crossterm-based terminal text viewer for Rust.
 //!
 //! Wrap any text with [`TxtView::new`], optionally tune it with
