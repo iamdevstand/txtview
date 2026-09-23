@@ -2,6 +2,7 @@
 
 [![crates.io](https://img.shields.io/crates/v/txtview.svg)](https://crates.io/crates/txtview)
 [![docs.rs](https://img.shields.io/docsrs/txtview)](https://docs.rs/txtview)
+[![CI](https://github.com/iamdevstand/txtview/actions/workflows/ci.yml/badge.svg)](https://github.com/iamdevstand/txtview/actions/workflows/ci.yml)
 
 **TxtView** is a lightweight text viewer for the terminal, written in Rust and built on [crossterm](https://github.com/crossterm-rs/crossterm). Drop it into your own CLI tools whenever you need a line-based viewer with scrolling, wrapping, line numbers, and an optional interactive scrollbar.
 
@@ -126,6 +127,8 @@ cargo run --example grapheme_clusters
 
 ## Building from Source
 
+Requires Rust **1.85 or newer** (edition 2024, declared MSRV).
+
 ```bash
 git clone https://github.com/iamdevstand/txtview
 cd txtview
@@ -141,6 +144,10 @@ cargo test
 ## License
 
 MIT License - see [LICENSE](LICENSE) for full details.
+
+## Security
+
+See [SECURITY.md](SECURITY.md) for how to report a vulnerability.
 
 ***
 
