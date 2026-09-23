@@ -121,6 +121,9 @@ cargo run --example control_chars
 # Show column-aware wrapping with CJK, emoji, and full-width punctuation
 cargo run --example visual_width
 
+# Show fixed-viewport clamping on narrow terminals
+cargo run --example narrow_viewports
+
 # Show how grapheme clusters (skintone modifiers, ZWJ families, flags) never split across a wrap
 cargo run --example grapheme_clusters
 ```
