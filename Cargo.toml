@@ -9,7 +9,7 @@ repository = "https://github.com/iamdevstand/txtview"
 authors = ["Devstand"]
 keywords = ["terminal", "tui", "text-viewer", "crossterm"]
 categories = ["command-line-interface", "text-processing"]
-exclude = [".vscode/", ".zed/"]
+exclude = [".vscode/", ".zed/", ".github/"]
 
 [dependencies]
 crossterm = { version = "0.29", default-features = false, features = ["events", "windows"] }
