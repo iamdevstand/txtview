@@ -50,13 +50,11 @@ fn utf8(bytes: &[u8]) -> Result<String, String> {
 }
 
 fn utf16(bytes: &[u8], little: bool) -> Result<String, String> {
-    let (units, tail) = bytes.as_chunks::<2>();
-    if !tail.is_empty() {
-        return Err("the file ends in the middle of a UTF-16 unit".to_string());
-    }
-    let units = units
-        .iter()
-        .map(|&pair| {
+    let mut chunks = bytes.chunks_exact(2);
+    let units = chunks
+        .by_ref()
+        .map(|pair| {
+            let pair = [pair[0], pair[1]];
             if little {
                 u16::from_le_bytes(pair)
             } else {
@@ -64,16 +62,20 @@ fn utf16(bytes: &[u8], little: bool) -> Result<String, String> {
             }
         })
         .collect::<Vec<_>>();
+    if !chunks.remainder().is_empty() {
+        return Err("the file ends in the middle of a UTF-16 unit".to_string());
+    }
     String::from_utf16(&units).map_err(|_| "unpaired UTF-16 surrogate".to_string())
 }
 
 fn utf32(bytes: &[u8], little: bool) -> Result<String, String> {
-    let (quads, tail) = bytes.as_chunks::<4>();
-    if !tail.is_empty() {
+    let mut chunks = bytes.chunks_exact(4);
+    if !chunks.remainder().is_empty() {
         return Err("the file ends in the middle of a UTF-32 unit".to_string());
     }
     let mut out = String::new();
-    for &quad in quads {
+    for quad in chunks.by_ref() {
+        let quad = [quad[0], quad[1], quad[2], quad[3]];
         let scalar = if little {
             u32::from_le_bytes(quad)
         } else {
