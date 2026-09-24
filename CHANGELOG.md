@@ -11,6 +11,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The input text is stored once in a single buffer with a byte-offset line index instead of one `String` per line, matching `str::lines()` semantics (CRLF, blank lines and a final trailing newline included) while cutting the per-line memory overhead and the allocation count from thousands to a handful.
 
+### Tests
+
+- Expanded the integration suite from four ad-hoc construction checks into three focused binaries (`tests/{config,construction,contract}.rs`) that pin the public API the way downstream crates use it: `str::lines()`-matching line counts including CRLF and multibyte input, every `with_*` builder and config round-trip and the `Send + Sync`, `Clone` and `Debug` guarantees.
+- The `NotConnected` error from `run()` on a non-terminal is tested end-to-end by re-running the test binary with its stdout piped, including a check that the child actually executed the assertion.
+
 ## [0.1.3] - 2026-09-23
 
 ### Added
