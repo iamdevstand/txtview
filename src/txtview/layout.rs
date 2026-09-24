@@ -87,7 +87,7 @@ impl TxtView {
     /// are off.
     fn prefix_width(&self) -> usize {
         if self.config.show_line_numbers {
-            self.lines.len().to_string().len() + 3
+            self.line_count().to_string().len() + 3
         } else {
             0
         }
@@ -125,7 +125,8 @@ impl TxtView {
     fn build_display(&self, geometry: LayoutGeometry) -> Vec<String> {
         let mut display = Vec::new();
 
-        for (i, line) in self.lines.iter().enumerate() {
+        for i in 0..self.line_count() {
+            let line = self.line(i);
             if line.is_empty() {
                 display.push(self.line_prefix(i, 0));
             } else {
@@ -181,7 +182,7 @@ impl TxtView {
         if !self.config.show_line_numbers {
             return String::new();
         }
-        let width = self.lines.len().to_string().len();
+        let width = self.line_count().to_string().len();
         let label = if chunk_index == 0 {
             (line_index + 1).to_string()
         } else {

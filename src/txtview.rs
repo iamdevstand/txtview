@@ -29,7 +29,8 @@ use layout::LayoutGeometry;
 /// caret notation. See [`TxtViewConfig`] for the available display options.
 #[derive(Clone)]
 pub struct TxtView {
-    lines: Vec<String>,
+    text: String,
+    line_starts: Vec<usize>,
     display: Vec<String>,
     offset: usize,
     max_offset: usize,
@@ -45,7 +46,7 @@ impl fmt::Debug for TxtView {
     /// scroll state are shown.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("TxtView")
-            .field("line_count", &self.lines.len())
+            .field("line_count", &self.line_starts.len())
             .field("display_rows", &self.display.len())
             .field("offset", &self.offset)
             .field("max_offset", &self.max_offset)
@@ -72,9 +73,11 @@ impl TxtView {
     /// assert_eq!(viewer.line_count(), 2);
     /// ```
     pub fn new(input: impl AsRef<str>) -> Self {
-        let lines: Vec<String> = input.as_ref().lines().map(String::from).collect();
+        let text = input.as_ref().to_owned();
+        let line_starts = index_lines(&text);
         let mut view = TxtView {
-            lines,
+            text,
+            line_starts,
             display: Vec::new(),
             offset: 0,
             max_offset: 0,
@@ -109,7 +112,31 @@ impl TxtView {
 
     /// The number of logical lines in the input.
     pub fn line_count(&self) -> usize {
-        self.lines.len()
+        self.line_starts.len()
+    }
+
+    /// The `i`-th line as a borrowed slice of the single text buffer.
+    ///
+    /// The slice is the content between line terminators: without the final
+    /// newline and without a `\r` that introduces it, so CRLF input renders
+    /// identically to how `str::lines()` split it. There is no per-line
+    /// allocation, callers that need one can copy the slice themselves.
+    fn line(&self, i: usize) -> &str {
+        let start = self.line_starts[i];
+        let raw_end = self
+            .line_starts
+            .get(i + 1)
+            .copied()
+            .unwrap_or(self.text.len());
+        let bytes = self.text.as_bytes();
+        let mut end = raw_end;
+        if end > start && bytes[end - 1] == b'\n' {
+            end -= 1;
+            if end > start && bytes[end - 1] == b'\r' {
+                end -= 1;
+            }
+        }
+        &self.text[start..end]
     }
 
     /// Returns a reference to the current configuration of this [`TxtView`].
@@ -129,6 +156,28 @@ impl TxtView {
     }
 }
 
+/// Byte offsets of each line's content, matching `str::lines()`.
+///
+/// Each `\n` ends the line that precedes it, a segment after the last newline
+/// is a line only when the text does not end with one (the trailing
+/// terminator is final, `""` has no lines at all). The `\n` and any `\r`
+/// before it stay outside the line and are stripped by [`TxtView::line`].
+fn index_lines(text: &str) -> Vec<usize> {
+    let bytes = text.as_bytes();
+    let mut starts = Vec::new();
+    let mut start = 0;
+    for (i, &byte) in bytes.iter().enumerate() {
+        if byte == b'\n' {
+            starts.push(start);
+            start = i + 1;
+        }
+    }
+    if !bytes.is_empty() && bytes[bytes.len() - 1] != b'\n' {
+        starts.push(start);
+    }
+    starts
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -146,6 +195,34 @@ mod tests {
             "must report the wrapped rows: {out}"
         );
         assert!(!out.contains("alpha"), "must not dump the document: {out}");
+    }
+
+    #[test]
+    fn line_index_matches_str_lines() {
+        let cases = [
+            ("", vec![] as Vec<&str>),
+            ("a", vec!["a"]),
+            ("a\nb", vec!["a", "b"]),
+            ("a\n", vec!["a"]),
+            ("a\n\n", vec!["a", ""]),
+            ("\n", vec![""]),
+            ("\n\n", vec!["", ""]),
+            ("a\n\nb", vec!["a", "", "b"]),
+            ("a\r\nb", vec!["a", "b"]),
+            ("a\rb", vec!["a\rb"]),
+            ("a\r", vec!["a\r"]),
+            ("\r\n", vec![""]),
+            ("\r\r\n", vec!["\r"]),
+            ("a\r\n\r\nb", vec!["a", "", "b"]),
+            ("a\r\nb\n", vec!["a", "b"]),
+        ];
+        for (input, expected) in cases {
+            let v = TxtView::new(input);
+            let got: Vec<&str> = (0..v.line_count()).map(|i| v.line(i)).collect();
+            assert_eq!(got, expected, "indexed lines for {input:?}");
+            let reference: Vec<&str> = input.lines().collect();
+            assert_eq!(got, reference, "must equal str::lines for {input:?}");
+        }
     }
 }
 
