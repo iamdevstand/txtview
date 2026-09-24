@@ -1,10 +1,5 @@
-//! Integration tests for the layout module: display rows, wrapping, geometry,
-//! and scroll-bounds behavior exercised through the full [TxtView].
-//!
-//! These live in a sibling module under `txtview` so they can read the
-//! viewer's private fields (`display`, `offset`, `max_offset`) and via
-//! `super::test_metrics`, the rebuild and wrap counters the production
-//! struct itself does not carry.
+//! The layout module's test suite, split into this file because it outgrew
+//! `layout.rs`.
 
 use crate::TxtViewConfig;
 
