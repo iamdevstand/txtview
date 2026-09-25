@@ -1,8 +1,6 @@
 //! Display layout: terminal/viewport geometry, scrolling bounds and the
 //! rebuild of the wrapped `display` rows.
 
-use crossterm::terminal;
-
 use super::TxtView;
 use crate::components::HelpBar;
 use crate::components::scrollbar::ScrollGeometry;
@@ -18,16 +16,12 @@ pub(super) struct LayoutGeometry {
 }
 
 impl TxtView {
-    pub(super) fn term_size() -> (u16, u16) {
-        terminal::size().unwrap_or((80, 24))
-    }
-
     /// The viewport width, clamped to the terminal the way the height is, so
     /// a configured width wider than the terminal cannot push writes past its
     /// edge. A fixed width of 0 is lifted to 1, so `Some(0)` shows one column
     /// instead of silently rendering nothing.
     fn resolved_width(&self) -> u16 {
-        let cols = Self::term_size().0;
+        let cols = self.cell_size.0;
         match self.config.viewport_width {
             Some(w) => w.max(1).min(cols),
             None => cols,
@@ -35,7 +29,7 @@ impl TxtView {
     }
 
     pub(super) fn resolved_height(&self) -> u16 {
-        let rows = Self::term_size().1;
+        let rows = self.cell_size.1;
         match self.config.viewport_height {
             Some(h) => h.max(1).min(rows),
             None => rows,
@@ -201,6 +195,7 @@ impl TxtView {
     /// be skipped between mouse events as long as nothing layout-affecting
     /// changed since the last draw.
     pub(super) fn refresh_bounds(&mut self) {
+        self.cell_size = Self::query_size();
         let overflows = self.config.show_scrollbar
             && ScrollGeometry::room_to_travel(self.display.len(), usize::from(self.visible_rows()));
         if overflows != self.scrollbar_active

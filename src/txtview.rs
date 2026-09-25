@@ -9,6 +9,7 @@ use std::fmt;
 
 use crate::TxtViewConfig;
 
+use crossterm::terminal;
 use layout::LayoutGeometry;
 
 /// A terminal text viewer.
@@ -53,6 +54,8 @@ pub struct TxtView {
     /// The geometry the `display` rows were wrapped for, `None` before the
     /// first layout.
     display_geometry: Option<LayoutGeometry>,
+    /// Cached terminal size, refreshed once per frame in `refresh_bounds`
+    cell_size: (u16, u16),
 }
 
 impl fmt::Debug for TxtView {
@@ -100,6 +103,7 @@ impl TxtView {
             drag_grab_offset: None,
             scrollbar_active: false,
             display_geometry: None,
+            cell_size: Self::query_size(),
         };
         view.refresh_bounds();
         view
@@ -169,6 +173,10 @@ impl TxtView {
     /// ```
     pub fn config(&self) -> &TxtViewConfig {
         &self.config
+    }
+
+    fn query_size() -> (u16, u16) {
+        terminal::size().unwrap_or((80, 24))
     }
 }
 

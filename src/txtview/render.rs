@@ -119,7 +119,7 @@ mod tests {
         };
         let mut v = TxtView::new(&text).with_config(config);
 
-        let (cols, rows) = TxtView::term_size();
+        let (cols, rows) = v.cell_size;
         assert!(
             usize::from(v.visible_rows()) <= usize::from(rows),
             "viewport {} exceeds terminal height {rows}",
