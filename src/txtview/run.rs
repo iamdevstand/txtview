@@ -19,11 +19,11 @@ use crate::surface::{Gesture, Request};
 const PAGE_JUMP_COOLDOWN: Duration = Duration::from_millis(200);
 
 /// Restores the terminal when dropped, so raw mode, the alternate screen,
-/// the hidden cursor and mouse capture are always cleaned up, even when a
-/// panic unwinds through the viewer. The restore runs once: the normal
-/// return path calls [`RestoreTerminal::restore`] so its failure is
-/// reported and the `Drop` fallback only handles a panic unwind, where
-/// failure cannot be reported.
+/// the hidden cursor and mouse capture are attempted on every exit, even
+/// when a panic unwinds through the viewer. The restore runs once: the
+/// return path calls [`RestoreTerminal::restore`] so its failure (a restore
+/// itself can fail) is reported when the session succeeded, and the `Drop`
+/// fallback only handles a panic unwind, where failure cannot be reported.
 struct RestoreTerminal {
     restore_attempted: bool,
 }
@@ -60,10 +60,11 @@ impl TxtView {
     /// Show the viewer and block until the user quits.
     ///
     /// This takes over the terminal: it enters raw mode, switches to an
-    /// alternate screen, hides the cursor, and enables mouse capture. The
-    /// terminal is always restored before returning, including on errors or
-    /// a panic (cleanup runs from a `Drop` guard) and a restore that
-    /// itself fails is reported.
+    /// alternate screen, hides the cursor, and enables mouse capture. A
+    /// restore is attempted before every return: on the normal path a
+    /// restore that itself fails is reported, on an error path the session
+    /// error is the one returned, and when a panic unwinds the `Drop` guard
+    /// cleans up as best it can, where a failure cannot be reported.
     ///
     /// # Errors
     ///

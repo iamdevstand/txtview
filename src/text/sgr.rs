@@ -1,8 +1,8 @@
 //! SGR (Select Graphic Rendition) styling state.
 //!
 //! Folds the SGR codes seen in the wrapped line into a live model of the
-//! terminal style, so [`SgrState::to_ansi`] can re-emit a compact and
-//! correct prefix at every wrap boundary.
+//! terminal style, so [`SgrState::to_ansi`] can re-emit a compact prefix at
+//! every wrap boundary.
 
 use std::collections::BTreeSet;
 
@@ -84,16 +84,26 @@ impl Param {
 /// Live styling state folded from the SGR codes seen so far.
 ///
 /// The wrapper re-emits this at each wrap boundary so a wrapped row opens
-/// with the exact style that was active when the line broke. Unlike a raw
-/// code log it understands attribute-off and reset semantics, so the
-/// emitted prefix stays small and contradiction-free.
+/// with the active style, folded to the codes this module models:
+/// attribute-off and reset codes update the state instead of being
+/// replayed in the folded prefix, and unsupported colon-style selectors
+/// are dropped, so the prefix is compact.
 #[derive(Default)]
 pub(super) struct SgrState {
+    /// Active attribute codes (bold, underline, ...), kept in a set so a
+    /// replayed prefix lists each once.
     attrs: BTreeSet<u8>,
+    /// The selected font, `None` when the primary font is active.
     font: Option<u8>,
+    /// Unrecognized SGR codes, kept once in first-seen order among
+    /// themselves so terminals where their order matters still get a
+    /// sensible replay.
     other: Vec<String>,
+    /// The foreground color slot, `None` when default.
     fg: Option<String>,
+    /// The background color slot, `None` when default.
     bg: Option<String>,
+    /// The underline color slot, `None` when default.
     ulcolor: Option<String>,
 }
 
@@ -274,8 +284,8 @@ impl SgrState {
                     // A malformed extended color (a bare 38, 48, 58 or
                     // sub-params that are neither 5 nor 2) is ignored
                     // rather than replayed, so a lone `38` can never
-                    // corrupt the color that follows. Its leftover
-                    // parameters are still folded below
+                    // corrupt the color that follows. Its semicolon-split
+                    // leftovers still fold as their own codes below
                 }
                 _ => {
                     self.push_other(code.to_string());
@@ -324,13 +334,14 @@ impl SgrState {
         Some(format!("\x1b[{}m", codes.join(";")))
     }
 
+    /// Reset to the default style: every attribute, color and font dropped.
     fn clear(&mut self) {
         *self = Self::default();
     }
 
     /// Record an unknown code once, in the order it first appeared, so the
-    /// replayed sequence matches the original for terminals where the order
-    /// of these codes matters.
+    /// replayed sequence keeps a stable first-seen order for terminals
+    /// where the order of these codes matters.
     fn push_other(&mut self, code: String) {
         if !self.other.contains(&code) {
             self.other.push(code);

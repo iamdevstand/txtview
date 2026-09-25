@@ -12,7 +12,9 @@ use crate::text::write_visible_row;
 /// granted row, blank past the document end, anchoring to the area it is
 /// handed.
 pub(crate) struct Content<'a> {
+    /// The wrapped display rows, shared with the viewer.
     display: &'a [String],
+    /// The first display row to show, the scroll offset.
     offset: usize,
 }
 

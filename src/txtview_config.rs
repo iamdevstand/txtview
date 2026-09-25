@@ -23,29 +23,35 @@
 /// ```
 /// New options arrive in minor releases (`0.x.0`) and always default to the
 /// previous behavior, so an existing viewer only changes look when you opt
-/// in. Patches (`0.0.x`) ship only bug fixes and purely additive methods.
+/// in. Patches (`0.x.y`) ship only bug fixes and purely additive methods.
 #[derive(Debug, Clone)]
 pub struct TxtViewConfig {
     /// Show a line-number column on the left side of the viewport.
+    /// Defaults to `false`.
     pub show_line_numbers: bool,
     /// Show the keybinding help bar at the bottom of the viewport.
+    /// Defaults to `true`.
     pub show_help_bar: bool,
     /// Show an interactive vertical scrollbar on the right edge. It can be
-    /// clicked to jump to a position or dragged to scroll.
+    /// clicked to jump to a position or dragged to scroll. Defaults to
+    /// `true`.
     pub show_scrollbar: bool,
     /// Fixed viewport width in columns. `None` uses the terminal width. A
     /// fixed width wider than the terminal is clamped to it, the way the
     /// height is, so writes can never pass the terminal edge. A fixed width
-    /// of 0 is lifted to 1 so nothing silently renders blank.
+    /// of 0 is lifted to 1 so nothing silently renders blank. Defaults to
+    /// `None`.
     pub viewport_width: Option<u16>,
     /// Fixed viewport height in rows. `None` uses the terminal height. A
     /// fixed height taller than the terminal is clamped to it, so a viewer
     /// larger than the screen still fits. A fixed height of 0 is lifted to
-    /// 1 so nothing silently renders blank.
+    /// 1 so nothing silently renders blank. Defaults to `None`.
     pub viewport_height: Option<u16>,
 }
 
 impl Default for TxtViewConfig {
+    /// The defaults: no line numbers, help bar on, scrollbar on, and both
+    /// viewport dimensions sized by the terminal.
     fn default() -> Self {
         TxtViewConfig {
             show_line_numbers: false,
@@ -80,7 +86,8 @@ impl TxtViewConfig {
     }
 
     /// Set a fixed viewport width in columns. `None` uses the terminal width,
-    /// and a width beyond it is clamped down to it.
+    /// and a width beyond it is clamped down to it. A width of 0 is treated
+    /// as 1.
     #[must_use]
     pub fn with_viewport_width(mut self, width: Option<u16>) -> Self {
         self.viewport_width = width;
@@ -88,7 +95,8 @@ impl TxtViewConfig {
     }
 
     /// Set a fixed viewport height in rows. `None` uses the terminal height,
-    /// and a height beyond it is clamped down to it.
+    /// and a height beyond it is clamped down to it. A height of 0 is treated
+    /// as 1.
     #[must_use]
     pub fn with_viewport_height(mut self, height: Option<u16>) -> Self {
         self.viewport_height = height;

@@ -9,8 +9,9 @@
 //!
 //! Wrap any text with [`TxtView::new`], optionally tune it with
 //! [`TxtViewConfig`], then call [`TxtView::run`]. The viewer takes over the
-//! terminal with an alternate screen, switches to raw mode, and restores the
-//! previous screen and settings when the user quits.
+//! terminal with an alternate screen, switches to raw mode and attempts to
+//! restore the previous screen and settings when the user quits, reporting a
+//! restore that fails.
 //!
 //! [`TxtView::run`] blocks for the whole session and requires an interactive
 //! terminal, so a small program is all it takes:
@@ -27,9 +28,10 @@
 //!
 //! ANSI colors and styling pass through unchanged: SGR codes and OSC8
 //! hyperlinks are preserved, and the active style is re-emitted compactly
-//! when a styled line wraps. Control bytes and other escape sequences are
-//! shown as visible caret notation. Build styled lines with crossterm's
-//! `style` module and feed them straight into [`TxtView::new`].
+//! when a styled line wraps. Control bytes and other escape sequences
+//! (tabs are expanded to spaces at their column stops) are shown as visible
+//! caret notation. Build styled lines with crossterm's `style` module and
+//! feed them straight into [`TxtView::new`].
 //!
 //! # Configuration
 //!

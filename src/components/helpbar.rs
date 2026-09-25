@@ -20,6 +20,7 @@ use crate::surface::{Anchor, Area, Component};
 /// grants it as far as the free space allows and draws the bar into the
 /// area it was granted.
 pub(crate) struct HelpBar {
+    /// The wrapped help text, one `String` per displayed line.
     rows: Vec<String>,
 }
 

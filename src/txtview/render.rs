@@ -1,3 +1,7 @@
+//! Frame composition and drawing: each redraw goes through this module, which
+//! (re)builds the display bounds, places the viewer's pieces on a [`Canvas`],
+//! paints them and flushes the buffer.
+
 use std::io;
 
 use super::TxtView;

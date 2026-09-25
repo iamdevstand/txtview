@@ -25,25 +25,40 @@ use layout::LayoutGeometry;
 ///
 /// ANSI styling is preserved: SGR color, style codes and OSC8 hyperlinks
 /// pass through, and the active style is re-emitted compactly when a styled
-/// line wraps. Control bytes and other escape sequences are shown as visible
-/// caret notation. See [`TxtViewConfig`] for the available display options.
+/// line wraps. Control bytes and other escape sequences (tabs are expanded
+/// to spaces at their column stops) are shown as visible caret notation.
+/// See [`TxtViewConfig`] for the available display options.
 #[derive(Clone)]
 pub struct TxtView {
+    /// The original input text, kept so lines can be borrowed from one buffer.
     text: String,
+    /// Byte offsets of each logical line's start, indexed per `str::lines()`.
     line_starts: Vec<usize>,
+    /// The wrapped display rows currently laid out.
     display: Vec<String>,
+    /// The first display row shown, the scroll offset.
     offset: usize,
+    /// The largest usable `offset` for the current layout.
     max_offset: usize,
+    /// The display options in effect.
     config: TxtViewConfig,
+    /// Where a live scrollbar drag grabbed the thumb, `Some` while dragging.
     drag_grab_offset: Option<usize>,
+    /// Whether the document qualifies for a scrollbar: set from
+    /// `config.show_scrollbar` and kept only while the document overflows
+    /// the viewport and the track can host a moving thumb. The column is
+    /// reserved only when this is also affordable, so `scrollbar_active`
+    /// can be true without a column being reserved.
     scrollbar_active: bool,
+    /// The geometry the `display` rows were wrapped for, `None` before the
+    /// first layout.
     display_geometry: Option<LayoutGeometry>,
 }
 
 impl fmt::Debug for TxtView {
     /// Describe the viewer without dumping its contents: the document can be
-    /// huge, and the wrapped `display` rows mirror it. Only counts and the
-    /// scroll state are shown.
+    /// huge, and the wrapped `display` rows mirror it. Counts, the scroll
+    /// state, the scrollbar activity and the configuration are shown.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("TxtView")
             .field("line_count", &self.line_starts.len())
@@ -90,7 +105,8 @@ impl TxtView {
         view
     }
 
-    /// Apply configuration and rebuild the display layout.
+    /// Apply configuration and reconcile the display layout (re-wrapping
+    /// only when the geometry or overflow state changes).
     ///
     /// Consumes the viewer and returns it so callers can chain:
     ///

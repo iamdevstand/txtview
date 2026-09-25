@@ -8,9 +8,9 @@ use unicode_width::UnicodeWidthChar;
 
 /// Whether `c` is rendered as 2-column caret notation (`^X` / `^?`).
 ///
-/// C0 controls (except tab and `ESC`, which are handled elsewhere), DEL and
-/// C1 controls are escaped so they never reach the terminal as live control
-/// bytes.
+/// C0 and C1 controls and DEL are escaped to caret notation so they never
+/// reach the terminal as live control bytes. Callers must handle tab and
+/// `ESC` before calling this, as the wrapper does.
 pub(super) fn caret_width(c: char) -> bool {
     let code = c as u32;
     code <= 0x1f || (0x7f..=0x9f).contains(&code)

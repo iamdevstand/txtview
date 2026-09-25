@@ -1,14 +1,24 @@
+//! Scrolling commands and their signed-delta reply, so the run loop knows
+//! whether a repaint is needed.
+//!
+//! Every command clamps the offset into `0..=max_offset` and returns how far
+//! it actually moved as a signed `isize`: positive toward the end, negative
+//! toward the start and zero when nothing moved.
+
 use super::TxtView;
 
 impl TxtView {
+    /// Move down `amount` display rows, clamped to `max_offset`.
     pub(crate) fn scroll_down(&mut self, amount: usize) -> isize {
         self.move_offset(self.offset.saturating_add(amount))
     }
 
+    /// Move to the absolute display row `offset`, clamped to `max_offset`.
     pub(crate) fn scroll_to(&mut self, offset: usize) -> isize {
         self.move_offset(offset)
     }
 
+    /// Move up `amount` display rows, clamped to `0`.
     pub(crate) fn scroll_up(&mut self, amount: usize) -> isize {
         self.move_offset(self.offset.saturating_sub(amount))
     }
@@ -17,10 +27,15 @@ impl TxtView {
         self.move_offset(0)
     }
 
+    /// Scroll so the end of the document is in view, the last display row
+    /// bottom-aligned when the document does not fit.
     pub(crate) fn jump_to_end(&mut self) -> isize {
         self.move_offset(self.max_offset)
     }
 
+    /// Set the offset to `target`, clamped to `0..=max_offset`, and return
+    /// how far it moved. The delta is positive when the offset increased,
+    /// negative when it decreased and zero when it did not move.
     fn move_offset(&mut self, target: usize) -> isize {
         let old = self.offset;
         self.offset = target.min(self.max_offset);

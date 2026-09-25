@@ -12,8 +12,11 @@ use crate::surface::{Anchor, Area, Component, Gesture, Request};
 /// scrollbar they are rows, for a horizontal scrollbar they are columns.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ScrollGeometry {
+    /// The thumb's start cell along the axis, `0` is the first track cell.
     pub(crate) top: usize,
+    /// The number of cells the thumb spans along the axis.
     pub(crate) size: usize,
+    /// The number of cells the track spans along the axis.
     pub(crate) visible: usize,
 }
 
@@ -83,6 +86,7 @@ pub(crate) enum Orientation {
 pub(crate) struct ScrollBar {
     geometry: ScrollGeometry,
     orientation: Orientation,
+    /// The offset a drag grabbed the thumb at, `Some` only while dragging.
     grab_offset: Option<usize>,
 }
 

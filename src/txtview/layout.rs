@@ -196,9 +196,10 @@ impl TxtView {
     ///
     /// Rebuilds the wrapped `display` when the geometry changed (resize or
     /// config flip) or the overflow state drifted, then recomputes
-    /// `max_offset` and clamps `offset`. All state, no terminal I/O, so it
-    /// runs before composing a frame and can be skipped between mouse events
-    /// as long as nothing layout-affecting changed since the last draw.
+    /// `max_offset` and clamps `offset`. All state except the terminal
+    /// query behind `term_size`, so it runs before composing a frame and can
+    /// be skipped between mouse events as long as nothing layout-affecting
+    /// changed since the last draw.
     pub(super) fn refresh_bounds(&mut self) {
         let overflows = self.config.show_scrollbar
             && ScrollGeometry::room_to_travel(self.display.len(), usize::from(self.visible_rows()));
