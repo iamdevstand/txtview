@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Every control character in wrapped rows measures as exactly two columns, so the wrapping width can no longer be misread as leaving one column for some controls.
+- `run()` reports a terminal restore that fails on the normal return path, where the `Drop` guard once dropped the teardown errors silently (the guard still cleans up on a panic, where reporting is impossible).
 - The scrollbar geometry guard no longer checks for an impossible zero visible area, the presence of the bar is decided by the scrollbar-reserved flag alone.
 - The input text is stored once in a single buffer with a byte-offset line index instead of one `String` per line, matching `str::lines()` semantics (CRLF, blank lines and a final trailing newline included) while cutting the per-line memory overhead and the allocation count from thousands to a handful.
 - Expanded the integration suite from four ad-hoc construction checks into three focused binaries (`tests/{config,construction,contract}.rs`) that pin the public API the way downstream crates use it: `str::lines()`-matching line counts including CRLF and multibyte input, every `with_*` builder and config round-trip and the `Send + Sync`, `Clone` and `Debug` guarantees.

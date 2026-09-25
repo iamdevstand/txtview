@@ -20,16 +20,39 @@ const PAGE_JUMP_COOLDOWN: Duration = Duration::from_millis(200);
 
 /// Restores the terminal when dropped, so raw mode, the alternate screen,
 /// the hidden cursor and mouse capture are always cleaned up, even when a
-/// panic unwinds through the viewer. Drop cannot report failure, so a
-/// restore that itself errors is silently dropped: the frame flush that
-/// runs before this guard is flushed explicitly and reported instead.
-struct RestoreTerminal;
+/// panic unwinds through the viewer. The restore runs once: the normal
+/// return path calls [`RestoreTerminal::restore`] so its failure is
+/// reported and the `Drop` fallback only handles a panic unwind, where
+/// failure cannot be reported.
+struct RestoreTerminal {
+    restore_attempted: bool,
+}
+
+impl RestoreTerminal {
+    fn new() -> Self {
+        Self {
+            restore_attempted: false,
+        }
+    }
+
+    /// Leave raw mode, exit the alternate screen, restore the cursor and
+    /// disable mouse capture, reporting the first failure. Both steps run
+    /// even when the first one fails, since leaving a terminal stuck in
+    /// raw mode is the worst outcome.
+    fn restore(&mut self) -> io::Result<()> {
+        self.restore_attempted = true;
+        let mut stdout = io::stdout();
+        let screen = execute!(stdout, DisableMouseCapture, LeaveAlternateScreen, Show);
+        let raw_mode = terminal::disable_raw_mode();
+        if screen.is_err() { screen } else { raw_mode }
+    }
+}
 
 impl Drop for RestoreTerminal {
     fn drop(&mut self) {
-        let mut stdout = io::stdout();
-        let _ = execute!(stdout, DisableMouseCapture, LeaveAlternateScreen, Show);
-        let _ = terminal::disable_raw_mode();
+        if !self.restore_attempted {
+            let _ = self.restore();
+        }
     }
 }
 
@@ -39,13 +62,15 @@ impl TxtView {
     /// This takes over the terminal: it enters raw mode, switches to an
     /// alternate screen, hides the cursor, and enables mouse capture. The
     /// terminal is always restored before returning, including on errors or
-    /// a panic (cleanup runs from a `Drop` guard).
+    /// a panic (cleanup runs from a `Drop` guard) and a restore that
+    /// itself fails is reported.
     ///
     /// # Errors
     ///
     /// Returns [`io::Error`] with [`io::ErrorKind::NotConnected`] when stdout
     /// is not a terminal (for example when output is piped), and
-    /// propagates I/O errors from the terminal itself or the event loop.
+    /// propagates I/O errors from the terminal itself, the event loop or
+    /// the teardown restore.
     ///
     /// # Keybindings
     ///
@@ -66,15 +91,30 @@ impl TxtView {
         }
 
         terminal::enable_raw_mode()?;
-        let _guard = RestoreTerminal;
+        let mut guard = RestoreTerminal::new();
         let mut stdout = io::BufWriter::with_capacity(256 * 1024, io::stdout());
 
-        execute!(stdout, EnterAlternateScreen, Hide, EnableMouseCapture)?;
-        self.event_loop(&mut stdout)?;
-        // Flush the final frame before the writer is dropped, so a write
-        // failure at teardown is reported instead of vanishing with the
-        // buffer. On the error path the event_loop error is the useful one
-        stdout.flush()
+        let result = (|| {
+            execute!(stdout, EnterAlternateScreen, Hide, EnableMouseCapture)?;
+            self.event_loop(&mut stdout)?;
+            // Flush the final frame before the writer is dropped, so a write
+            // failure at teardown is reported instead of vanishing with the
+            // buffer. On the error path the event_loop error is the useful one
+            stdout.flush()
+        })();
+        // Drop the writer before restoring so the restore's own writes see
+        // the flushed frame and report cleanly
+        drop(stdout);
+
+        let restore = guard.restore();
+        if result.is_err() {
+            // The session error is the useful one, so a failed restore
+            // reports through it when both fail
+            let _ = restore;
+            result
+        } else {
+            restore
+        }
     }
 
     fn event_loop(&mut self, stdout: &mut impl io::Write) -> io::Result<()> {
