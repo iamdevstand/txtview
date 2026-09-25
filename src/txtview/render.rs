@@ -60,6 +60,7 @@ impl TxtView {
 mod tests {
     use super::*;
     use crate::TxtViewConfig;
+    use crate::components::scrollbar::{THUMB_DRAGGED, THUMB_IDLE, TRACK};
     use crate::surface::{Area, Gesture};
 
     fn max_move_to_row(out: &[u8]) -> usize {
@@ -175,7 +176,7 @@ mod tests {
         v.draw(&mut out).unwrap();
         let s = String::from_utf8_lossy(&out);
         assert!(
-            s.contains(['█', '░', '▓']),
+            s.contains([THUMB_IDLE, TRACK, THUMB_DRAGGED]),
             "the scrollbar column paints its thumb and track glyphs: {s:?}"
         );
     }

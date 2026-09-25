@@ -4,6 +4,13 @@ use crossterm::{QueueableCommand, cursor::MoveTo};
 
 use crate::surface::{Anchor, Area, Component, Gesture, Request};
 
+/// The thumb's fill while a drag is grabbing it, the bar's only live state.
+pub(crate) const THUMB_DRAGGED: char = '▓';
+/// The thumb's fill at rest, unpressed by a drag.
+pub(crate) const THUMB_IDLE: char = '█';
+/// The track cells the thumb runs along.
+pub(crate) const TRACK: char = '░';
+
 /// Geometric data for a single scrollbar frame: where the thumb sits and how
 /// far it stretches, measured along the scrollbar's own axis. Produced by
 /// [`TxtView::scroll_geometry`](crate::txtview::TxtView) and consumed by the
@@ -106,12 +113,12 @@ impl ScrollBar {
     fn cell(&self, i: usize) -> char {
         if i >= self.geometry.top && i < self.geometry.top + self.geometry.size {
             if self.grab_offset.is_some() {
-                '▓'
+                THUMB_DRAGGED
             } else {
-                '█'
+                THUMB_IDLE
             }
         } else {
-            '░'
+            TRACK
         }
     }
 }
@@ -284,8 +291,14 @@ mod tests {
     #[test]
     fn emits_thumb_and_track_runs() {
         let out = render(Orientation::Vertical);
-        assert!(out.contains('█'), "expected a thumb in output: {out:?}");
-        assert!(out.contains('░'), "expected track runs in output: {out:?}");
+        assert!(
+            out.contains(THUMB_IDLE),
+            "expected a thumb in output: {out:?}"
+        );
+        assert!(
+            out.contains(TRACK),
+            "expected track runs in output: {out:?}"
+        );
     }
 
     #[test]
@@ -295,7 +308,7 @@ mod tests {
         bar.render(placed(&bar), &mut out).unwrap();
         let out = String::from_utf8(out).unwrap();
         assert!(
-            out.contains('▓'),
+            out.contains(THUMB_DRAGGED),
             "expected the dragging fill in output: {out:?}"
         );
     }
