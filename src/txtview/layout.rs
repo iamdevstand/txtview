@@ -239,10 +239,10 @@ impl TxtView {
     /// returns `None`, and `compose` then draws no bar for one frame instead
     /// of faulting.
     pub(super) fn scroll_geometry(&self) -> Option<ScrollGeometry> {
-        let visible = usize::from(self.visible_rows());
-        if visible == 0 || !self.scrollbar_reserved() {
+        if !self.scrollbar_reserved() {
             return None;
         }
+        let visible = usize::from(self.visible_rows());
         debug_assert!(
             self.max_offset > 0,
             "a reserved bar must have a scroll range"
