@@ -5,7 +5,7 @@ use std::borrow::Cow;
 
 use unicode_segmentation::UnicodeSegmentation;
 
-use super::ansi::{Esc, caret_notation, caret_width, display_width, escape_display, parse_escape};
+use super::ansi::{Esc, caret_notation, display_width, escape_display, parse_escape};
 use super::sgr::SgrState;
 
 /// Columns between tab stops.
@@ -21,13 +21,7 @@ pub(super) fn cluster_width_at(cluster: &str, col: usize) -> usize {
     let c = cluster.chars().next().unwrap_or('\u{fffd}');
     match c {
         '\t' => TAB_WIDTH - col % TAB_WIDTH,
-        c if c.is_control() => {
-            if caret_width(c) {
-                2
-            } else {
-                1
-            }
-        }
+        c if c.is_control() => 2,
         _ => cluster_visual_width(cluster),
     }
 }
