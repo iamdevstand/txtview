@@ -173,15 +173,19 @@ impl SgrState {
             };
             match code {
                 SGR_RESET => self.clear(),
-                SGR_BOLD | SGR_DIM | SGR_ITALIC | SGR_BLINK | SGR_RAPID_BLINK | SGR_REVERSE
-                | SGR_CONCEAL | SGR_DOUBLE_UNDERLINE | SGR_FRAME | SGR_CIRCLE | SGR_OVERLINE => {
+                SGR_BOLD | SGR_DIM | SGR_ITALIC | SGR_REVERSE | SGR_CONCEAL | SGR_OVERLINE => {
                     self.attrs.insert(code);
                     // Any colon modifier on these attributes is unsupported
                     // and dropped
                 }
+                SGR_BLINK => self.select_attr(SGR_BLINK, SGR_RAPID_BLINK),
+                SGR_RAPID_BLINK => self.select_attr(SGR_RAPID_BLINK, SGR_BLINK),
+                SGR_DOUBLE_UNDERLINE => self.select_attr(SGR_DOUBLE_UNDERLINE, SGR_UNDERLINE),
+                SGR_FRAME => self.select_attr(SGR_FRAME, SGR_CIRCLE),
+                SGR_CIRCLE => self.select_attr(SGR_CIRCLE, SGR_FRAME),
                 SGR_UNDERLINE => {
-                    // `4:` carries an underline style selector
-                    self.attrs.insert(SGR_UNDERLINE);
+                    // `4:` carries an underline style selector; a plain `4`
+                    // supersedes a previous double underline
                     if advance > 0 {
                         match params[i + 1] {
                             // `4:0` selects no underline style
@@ -191,16 +195,17 @@ impl SgrState {
                             }
                             // `4:2` selects double underline
                             Param::Num(2) => {
-                                self.attrs.remove(&SGR_UNDERLINE);
-                                self.attrs.insert(SGR_DOUBLE_UNDERLINE);
+                                self.select_attr(SGR_DOUBLE_UNDERLINE, SGR_UNDERLINE);
                             }
                             // `4:1` and the curly/dotted/dashed styles 3-9
                             // stay single underline; the unsupported style
                             // selector is dropped
                             _ => {
-                                self.attrs.remove(&SGR_DOUBLE_UNDERLINE);
+                                self.select_attr(SGR_UNDERLINE, SGR_DOUBLE_UNDERLINE);
                             }
                         }
+                    } else {
+                        self.select_attr(SGR_UNDERLINE, SGR_DOUBLE_UNDERLINE);
                     }
                 }
                 SGR_STRIKE => {
@@ -293,6 +298,15 @@ impl SgrState {
             }
             i += advance + 1;
         }
+    }
+
+    /// Select an attribute that supersedes its exclusive alternative, so a
+    /// later code in the same slot wins the replay. SGR defines single and
+    /// double underline (`4`/`21`), blink and rapid blink (`5`/`6`) and
+    /// frame and encircled (`51`/`52`) as alternative selections.
+    fn select_attr(&mut self, code: u8, alternative: u8) {
+        self.attrs.remove(&alternative);
+        self.attrs.insert(code);
     }
 
     /// Store a folded extended color slot in the field owned by `code`.
@@ -405,6 +419,153 @@ mod tests {
         assert_eq!(
             state(&["\x1b[31m", "\x1b[32m"]),
             Some("\x1b[32m".to_string())
+        );
+    }
+
+    #[test]
+    fn exclusive_underline_alternatives_supersede() {
+        assert_eq!(
+            state(&["\x1b[21m", "\x1b[4m"]),
+            Some("\x1b[4m".to_string()),
+            "single underline must win over an older double"
+        );
+        assert_eq!(
+            state(&["\x1b[4m", "\x1b[21m"]),
+            Some("\x1b[21m".to_string()),
+            "double underline must win over an older single"
+        );
+    }
+
+    #[test]
+    fn exclusive_blink_alternatives_supersede() {
+        assert_eq!(
+            state(&["\x1b[6m", "\x1b[5m"]),
+            Some("\x1b[5m".to_string()),
+            "blink must win over an older rapid blink"
+        );
+        assert_eq!(
+            state(&["\x1b[5m", "\x1b[6m"]),
+            Some("\x1b[6m".to_string()),
+            "rapid blink must win over an older blink"
+        );
+    }
+
+    #[test]
+    fn exclusive_frame_alternatives_supersede() {
+        assert_eq!(
+            state(&["\x1b[52m", "\x1b[51m"]),
+            Some("\x1b[51m".to_string()),
+            "frame must win over an older encircled"
+        );
+        assert_eq!(
+            state(&["\x1b[51m", "\x1b[52m"]),
+            Some("\x1b[52m".to_string()),
+            "encircled must win over an older frame"
+        );
+    }
+
+    #[test]
+    fn exclusive_pairs_on_combined_with_other_attributes() {
+        assert_eq!(
+            state(&["\x1b[1;21m", "\x1b[4m"]),
+            Some("\x1b[1;4m".to_string()),
+            "a later single underline wins over double while bold survives"
+        );
+        assert_eq!(
+            state(&["\x1b[1;4m", "\x1b[21m"]),
+            Some("\x1b[1;21m".to_string()),
+            "a later double underline wins over single while bold survives"
+        );
+    }
+
+    #[test]
+    fn exclusive_pairs_clear_both_members_after_supersede() {
+        assert_eq!(
+            state(&["\x1b[1;21m", "\x1b[4m", "\x1b[24m"]),
+            Some("\x1b[1m".to_string()),
+            "underline-off clears a superseded double and its single replacement"
+        );
+        assert_eq!(
+            state(&["\x1b[1;4m", "\x1b[21m", "\x1b[24m"]),
+            Some("\x1b[1m".to_string()),
+            "underline-off clears a superseded single and its double replacement"
+        );
+        assert_eq!(
+            state(&["\x1b[1;6m", "\x1b[5m", "\x1b[25m"]),
+            Some("\x1b[1m".to_string()),
+            "blink-off clears a superseded rapid blink and its blink replacement"
+        );
+        assert_eq!(
+            state(&["\x1b[1;5m", "\x1b[6m", "\x1b[25m"]),
+            Some("\x1b[1m".to_string()),
+            "blink-off clears a superseded blink and its rapid blink replacement"
+        );
+        assert_eq!(
+            state(&["\x1b[1;52m", "\x1b[51m", "\x1b[54m"]),
+            Some("\x1b[1m".to_string()),
+            "frame-off clears a superseded encircled and its frame replacement"
+        );
+        assert_eq!(
+            state(&["\x1b[1;51m", "\x1b[52m", "\x1b[54m"]),
+            Some("\x1b[1m".to_string()),
+            "frame-off clears a superseded frame and its encircled replacement"
+        );
+    }
+
+    #[test]
+    fn colon_underline_selector_overrides_existing_style() {
+        assert_eq!(
+            state(&["\x1b[21m", "\x1b[4:2m"]),
+            Some("\x1b[21m".to_string()),
+            "4:2 after double underline keeps double instead of going single"
+        );
+        assert_eq!(
+            state(&["\x1b[4m", "\x1b[4:2m"]),
+            Some("\x1b[21m".to_string()),
+            "4:2 after single underline supersedes it"
+        );
+        assert_eq!(
+            state(&["\x1b[4:2m", "\x1b[4:1m"]),
+            Some("\x1b[4m".to_string()),
+            "a later single style supersedes double underline"
+        );
+        assert_eq!(
+            state(&["\x1b[21m", "\x1b[4:0m"]),
+            None,
+            "4:0 clears an active double underline"
+        );
+    }
+
+    #[test]
+    fn single_sequence_supersedes_to_its_later_member() {
+        assert_eq!(
+            state(&["\x1b[4;21m"]),
+            Some("\x1b[21m".to_string()),
+            "in one sequence the later member wins"
+        );
+        assert_eq!(
+            state(&["\x1b[21;4m"]),
+            Some("\x1b[4m".to_string()),
+            "in one sequence the later member wins"
+        );
+        assert_eq!(
+            state(&["\x1b[5;6m"]),
+            Some("\x1b[6m".to_string()),
+            "in one sequence the later member wins"
+        );
+        assert_eq!(
+            state(&["\x1b[51;52m"]),
+            Some("\x1b[52m".to_string()),
+            "in one sequence the later member wins"
+        );
+    }
+
+    #[test]
+    fn no_underline_selector_preserves_other_attributes() {
+        assert_eq!(
+            state(&["\x1b[1m", "\x1b[4:0m"]),
+            Some("\x1b[1m".to_string()),
+            "4:0 clears only the underline slots, not bold"
         );
     }
 

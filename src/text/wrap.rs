@@ -292,6 +292,45 @@ mod tests {
     }
 
     #[test]
+    fn exclusive_pair_replays_only_the_later_member_across_wrap() {
+        assert_eq!(
+            wrap_line_ansi("\x1b[21m\x1b[4mabcdef\x1b[0m", 3, 0),
+            vec!["\x1b[21m\x1b[4mabc\x1b[0m", "\x1b[4mdef\x1b[0m"],
+            "a wrapped row opens single underlined, not double"
+        );
+        assert_eq!(
+            wrap_line_ansi("\x1b[4m\x1b[21mabcdef\x1b[0m", 3, 0),
+            vec!["\x1b[4m\x1b[21mabc\x1b[0m", "\x1b[21mdef\x1b[0m"],
+            "a wrapped row opens double underlined, not single"
+        );
+        assert_eq!(
+            wrap_line_ansi("\x1b[6m\x1b[5mabcdef\x1b[0m", 3, 0),
+            vec!["\x1b[6m\x1b[5mabc\x1b[0m", "\x1b[5mdef\x1b[0m"],
+            "a wrapped row opens blinking, not rapid blinking"
+        );
+        assert_eq!(
+            wrap_line_ansi("\x1b[5m\x1b[6mabcdef\x1b[0m", 3, 0),
+            vec!["\x1b[5m\x1b[6mabc\x1b[0m", "\x1b[6mdef\x1b[0m"],
+            "a wrapped row opens rapid blinking, not blinking"
+        );
+        assert_eq!(
+            wrap_line_ansi("\x1b[52m\x1b[51mabcdef\x1b[0m", 3, 0),
+            vec!["\x1b[52m\x1b[51mabc\x1b[0m", "\x1b[51mdef\x1b[0m"],
+            "a wrapped row opens framed, not encircled"
+        );
+        assert_eq!(
+            wrap_line_ansi("\x1b[51m\x1b[52mabcdef\x1b[0m", 3, 0),
+            vec!["\x1b[51m\x1b[52mabc\x1b[0m", "\x1b[52mdef\x1b[0m"],
+            "a wrapped row opens encircled, not framed"
+        );
+        assert_eq!(
+            wrap_line_ansi("\x1b[1m\x1b[21m\x1b[4mabcdef\x1b[0m", 3, 0),
+            vec!["\x1b[1m\x1b[21m\x1b[4mabc\x1b[0m", "\x1b[1;4mdef\x1b[0m"],
+            "a wrapped row keeps bold alongside the later underline"
+        );
+    }
+
+    #[test]
     fn plain_text_unchanged() {
         let line = "hello world";
         let chunks = wrap_line_ansi(line, 5, 0);
