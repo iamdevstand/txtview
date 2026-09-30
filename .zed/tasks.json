@@ -1,0 +1,35 @@
+[
+  {
+    "label": "Run tests",
+    "command": "cargo test --all-features --locked",
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "reveal": "always",
+    "hide": "never",
+    "use_new_terminal": false,
+    "env": {
+      "ExecutionPolicy": "Bypass",
+    },
+  },
+  {
+    "label": "Check formatting",
+    "command": "cargo fmt --check",
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "reveal": "always",
+    "hide": "never",
+    "use_new_terminal": false,
+    "env": {
+      "ExecutionPolicy": "Bypass",
+    },
+  },
+  {
+    "label": "Check clippy",
+    "command": "cargo clippy --all-targets --all-features --locked ",
+    "cwd": "$ZED_WORKTREE_ROOT",
+    "reveal": "always",
+    "hide": "never",
+    "use_new_terminal": false,
+    "env": {
+      "ExecutionPolicy": "Bypass",
+    },
+  },
+]
