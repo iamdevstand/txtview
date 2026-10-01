@@ -11,20 +11,33 @@ use crate::text::write_visible_row;
 /// first and content is granted whatever remains of it. It fills every
 /// granted row, blank past the document end, anchoring to the area it is
 /// handed.
-pub(crate) struct Content<'a> {
-    /// The wrapped display rows, shared with the viewer.
-    display: &'a [String],
+///
+/// The rows come from a provider that materializes one absolute display row
+/// on demand (`None` past the document end), so a frame holds a single row
+/// string instead of an entire pre-wrapped window.
+pub(crate) struct Content<F>
+where
+    F: Fn(usize) -> Option<String>,
+{
+    /// Materialize the `row`-th display row, `None` past the document end.
+    row: F,
     /// The first display row to show, the scroll offset.
     offset: usize,
 }
 
-impl<'a> Content<'a> {
-    pub(crate) fn new(display: &'a [String], offset: usize) -> Self {
-        Content { display, offset }
+impl<F> Content<F>
+where
+    F: Fn(usize) -> Option<String>,
+{
+    pub(crate) fn new(row: F, offset: usize) -> Self {
+        Content { row, offset }
     }
 }
 
-impl Component for Content<'_> {
+impl<F> Component for Content<F>
+where
+    F: Fn(usize) -> Option<String>,
+{
     fn area(&self, boxed: Area) -> Area {
         boxed
     }
@@ -34,11 +47,8 @@ impl Component for Content<'_> {
             return Ok(());
         }
         for i in 0..area.height {
-            let text = self
-                .display
-                .get(self.offset + usize::from(i))
-                .map(String::as_str)
-                .unwrap_or("");
+            let text = (self.row)(self.offset + usize::from(i));
+            let text = text.as_deref().unwrap_or("");
             let (col, row) = (area.col, area.row + i);
             QueueableCommand::queue(out, MoveTo(col, row))?;
             // Write the leading text that fits the area, skipping a trailing
@@ -62,7 +72,7 @@ mod tests {
     fn render(text: &[&str], offset: usize, area: Area) -> String {
         let display: Vec<String> = text.iter().map(|s| s.to_string()).collect();
         let mut out = Vec::new();
-        Content::new(&display, offset)
+        Content::new(move |row| display.get(row).cloned(), offset)
             .render(area, &mut out)
             .unwrap();
         String::from_utf8(out).unwrap()

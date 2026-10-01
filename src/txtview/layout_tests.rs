@@ -4,7 +4,16 @@
 use crate::TxtViewConfig;
 
 use super::TxtView;
-use super::test_metrics::{rebuilds, reset, wraps};
+use super::test_metrics::{materialized, rebuilds, reset, wraps};
+
+/// The whole wrapped document as the old `display` produced it, so the
+/// existing assertions still pin row-for-row output while the viewer itself
+/// only materializes rows on demand.
+fn all_display_rows(v: &TxtView) -> Vec<String> {
+    (0..v.display_len())
+        .filter_map(|row| v.display_row(row))
+        .collect()
+}
 
 fn viewer(input: &str, width: u16) -> TxtView {
     let config = TxtViewConfig {
@@ -42,37 +51,40 @@ const LINE_NUMBERS: TxtViewConfig = TxtViewConfig {
 #[test]
 fn tab_wrapped_line_renders_correctly() {
     let v = viewer("a\tb", 8);
-    assert_eq!(v.display, vec!["a\t", "b"]);
+    assert_eq!(all_display_rows(&v), vec!["a\t", "b"]);
 }
 
 #[test]
 fn display_single_row_per_line_when_fits() {
     let v = viewer("abc\ndef\nghi", 80);
-    assert_eq!(v.display, vec!["abc", "def", "ghi"]);
+    assert_eq!(all_display_rows(&v), vec!["abc", "def", "ghi"]);
 }
 
 #[test]
 fn display_wraps_long_lines() {
     let v = viewer("abcdefghij", 4);
-    assert_eq!(v.display, vec!["abcd", "efgh", "ij"]);
+    assert_eq!(all_display_rows(&v), vec!["abcd", "efgh", "ij"]);
 }
 
 #[test]
 fn display_preserves_empty_lines() {
     let v = viewer("a\n\nb", 10);
-    assert_eq!(v.display, vec!["a", "", "b"]);
+    assert_eq!(all_display_rows(&v), vec!["a", "", "b"]);
 }
 
 #[test]
 fn display_adds_line_number_prefix() {
     let v = TxtView::new("abc\ndef").with_config(LINE_NUMBERS);
-    assert_eq!(v.display, vec!["1 │ abc", "2 │ def"]);
+    assert_eq!(all_display_rows(&v), vec!["1 │ abc", "2 │ def"]);
 }
 
 #[test]
 fn display_carries_prefix_to_wrapped_rows() {
     let v = TxtView::new("abcdefghijk").with_config(LINE_NUMBERS);
-    assert_eq!(v.display, vec!["1 │ abcd", "↳ │ efgh", "↳ │ ijk"]);
+    assert_eq!(
+        all_display_rows(&v),
+        vec!["1 │ abcd", "↳ │ efgh", "↳ │ ijk"]
+    );
 }
 
 #[test]
@@ -85,7 +97,7 @@ fn display_reserves_no_scrollbar_column_when_fits() {
         ..TxtViewConfig::default()
     };
     let v = TxtView::new("abcdef").with_config(config);
-    assert_eq!(v.display, vec!["abcd", "ef"]);
+    assert_eq!(all_display_rows(&v), vec!["abcd", "ef"]);
     assert_eq!(v.max_offset, 0);
 }
 
@@ -104,10 +116,10 @@ fn display_reserves_scrollbar_column_when_overflowing() {
         .join("\n");
     let v = TxtView::new(&input).with_config(config);
     assert!(v.max_offset > 0, "must actually overflow");
+    let rows = all_display_rows(&v);
     assert!(
-        v.display.iter().all(|row| row.chars().count() <= 3),
-        "scrollbar column must be reserved on overflow: {:?}",
-        v.display
+        rows.iter().all(|row| row.chars().count() <= 3),
+        "scrollbar column must be reserved on overflow: {rows:?}"
     );
 }
 
@@ -125,16 +137,16 @@ fn scrollbar_column_released_when_config_turned_off() {
         .collect::<Vec<_>>()
         .join("\n");
     let v = TxtView::new(&input).with_config(config(true));
+    let reserved = all_display_rows(&v);
     assert!(
-        v.display.iter().all(|row| row.chars().count() <= 3),
-        "scrollbar enabled + overflow must reserve: {:?}",
-        v.display
+        reserved.iter().all(|row| row.chars().count() <= 3),
+        "scrollbar enabled + overflow must reserve: {reserved:?}"
     );
     let v = v.with_config(config(false));
+    let released = all_display_rows(&v);
     assert!(
-        v.display.iter().all(|row| row.chars().count() <= 4),
-        "scrollbar off must release the column: {:?}",
-        v.display
+        released.iter().all(|row| row.chars().count() <= 4),
+        "scrollbar off must release the column: {released:?}"
     );
 }
 
@@ -207,7 +219,7 @@ fn width_change_rebuilds_display() {
     let n = rebuilds();
     let v = v.with_config(config(5));
     assert!(rebuilds() > n, "width change must re-wrap");
-    assert_eq!(v.display, vec!["abcde", "fghij"]);
+    assert_eq!(all_display_rows(&v), vec!["abcde", "fghij"]);
 }
 
 #[test]
@@ -234,13 +246,16 @@ fn height_change_reuses_display() {
 #[test]
 fn display_counts_wide_chars_by_visual_width() {
     let v = viewer("ひらがなカタカナ", 8);
-    assert_eq!(v.display, vec!["ひらがな", "カタカナ"]);
+    assert_eq!(all_display_rows(&v), vec!["ひらがな", "カタカナ"]);
 }
 
 #[test]
 fn display_keeps_ansi_codes_intact() {
     let v = viewer("\x1b[31m12345\x1b[0m", 3);
-    assert_eq!(v.display, vec!["\x1b[31m123\x1b[0m", "\x1b[31m45\x1b[0m"]);
+    assert_eq!(
+        all_display_rows(&v),
+        vec!["\x1b[31m123\x1b[0m", "\x1b[31m45\x1b[0m"]
+    );
 }
 
 #[test]
@@ -390,10 +405,10 @@ fn overflow_reserves_column_only_after_one_wrap() {
     assert!(rebuilds() >= 1, "construction must have rebuilt");
     assert_eq!(
         wraps(),
-        rebuilds(),
-        "an overflowing document must be wrapped once per rebuild: the \
-         scrollbar column is reserved before wrapping, so no re-wrap is needed \
-         to carve it out (wrapped {} times for {} rebuilds)",
+        v.line_count() * rebuilds(),
+        "an overflowing document must measure every line once per rebuild: the \
+         scrollbar column is reserved before indexing, so no re-index is needed \
+         to carve it out (measured {} lines over {} rebuilds)",
         wraps(),
         rebuilds(),
     );
@@ -408,10 +423,10 @@ fn fitting_document_releases_the_reserved_column() {
         "a fitting document must not keep a bar"
     );
     assert_eq!(
-        wraps() - rebuilds(),
-        rebuilds(),
-        "the release re-wrap costs one extra pass per rebuild, on a document \
-         small enough that the reserved-width wrap only just fit"
+        wraps(),
+        v.line_count() * rebuilds() * 2,
+        "the release re-index costs one extra line-measuring pass per rebuild, \
+         on a document small enough that the reserved-width wrap only just fit"
     );
 }
 
@@ -437,10 +452,10 @@ fn scrollbar_column_released_when_height_makes_content_fit() {
     };
     let mut v = TxtView::new(&input).with_config(tall.clone());
     assert!(v.scrollbar_active, "11 rows must overflow 10");
+    let reserved = all_display_rows(&v);
     assert!(
-        v.display.iter().all(|row| row.chars().count() <= 3),
-        "the scrollbar column must be reserved while it overflows: {:?}",
-        v.display
+        reserved.iter().all(|row| row.chars().count() <= 3),
+        "the scrollbar column must be reserved while it overflows: {reserved:?}"
     );
 
     let short = TxtViewConfig {
@@ -455,13 +470,105 @@ fn scrollbar_column_released_when_height_makes_content_fit() {
     );
     assert_eq!(v.max_offset, 0);
     assert_eq!(
-        v.display.len(),
+        v.display_len(),
         11,
         "the freed column must stop the wrapping"
     );
+    let released = all_display_rows(&v);
     assert!(
-        v.display.iter().all(|row| row.chars().count() <= 4),
-        "the freed column must be released: {:?}",
-        v.display
+        released.iter().all(|row| row.chars().count() <= 4),
+        "the freed column must be released: {released:?}"
+    );
+}
+
+#[test]
+fn row_layout_chains_rows_for_every_source_line() {
+    let fixtures = [
+        ("", 80u16),
+        ("a", 4),
+        ("abcdefghij", 4),
+        ("a\n\nb", 10),
+        ("abcdefghij\n\nabc", 4),
+        ("\x1b[31m12345\x1b[0m", 3),
+        ("ab\tcd", 4),
+        ("abc\ndef\nghi", 80),
+    ];
+    for (input, width) in fixtures {
+        let v = viewer(input, width);
+        let mut first = 0;
+        for entry in &v.row_layout {
+            assert_eq!(
+                entry.first_row, first,
+                "rows must chain end to end for {input:?}"
+            );
+            assert!(
+                entry.rows >= 1,
+                "each source line yields at least one row for {input:?}"
+            );
+            first += entry.rows;
+        }
+        assert_eq!(
+            first,
+            v.display_len(),
+            "the running total is the display length for {input:?}"
+        );
+        for row in 0..v.display_len() {
+            assert!(
+                v.display_row(row).is_some(),
+                "every indexed row must materialize for {input:?} at row {row}"
+            );
+        }
+        assert!(
+            v.display_row(v.display_len()).is_none(),
+            "a row past the document is None for {input:?}"
+        );
+    }
+}
+
+#[test]
+fn draw_wraps_and_materializes_only_the_visible_window() {
+    reset();
+    let config = TxtViewConfig {
+        show_help_bar: false,
+        show_scrollbar: false,
+        viewport_width: Some(80),
+        viewport_height: Some(10),
+        ..TxtViewConfig::default()
+    };
+    let text = (0..1000)
+        .map(|i| format!("line {i}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut v = TxtView::new(&text).with_config(config);
+    assert_eq!(
+        materialized(),
+        0,
+        "construction must only count rows, never materialize them"
+    );
+    assert!(
+        v.display_len() > usize::from(v.visible_rows()),
+        "fixture must overflow the viewport"
+    );
+
+    let mut out = Vec::new();
+    v.draw(&mut out).unwrap();
+    let first = materialized();
+    assert_eq!(
+        first,
+        usize::from(v.visible_rows()),
+        "one frame materializes exactly the visible content rows"
+    );
+
+    v.scroll_down(1);
+    let mut out = Vec::new();
+    v.draw(&mut out).unwrap();
+    assert_eq!(
+        materialized() - first,
+        usize::from(v.visible_rows()),
+        "scrolling materializes one new window, not the whole document"
+    );
+    assert!(
+        materialized() * 2 < v.display_len(),
+        "the materialized rows must stay a fraction of the document"
     );
 }

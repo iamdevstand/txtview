@@ -1,10 +1,10 @@
 //! Display layout: terminal/viewport geometry, scrolling bounds and the
-//! rebuild of the wrapped `display` rows.
+//! row-count index of the wrapped display rows.
 
 use super::TxtView;
 use crate::components::HelpBar;
 use crate::components::scrollbar::ScrollGeometry;
-use crate::text::wrap_line_ansi;
+use crate::text::{wrap_line_ansi, wrap_line_ansi_count};
 
 /// The geometry the wrapped display is produced from: the columns available
 /// to the text and the width of the line-number prefix. Carried as a named
@@ -13,6 +13,16 @@ use crate::text::wrap_line_ansi;
 pub(super) struct LayoutGeometry {
     avail: usize,
     prefix_width: usize,
+}
+
+/// A source line's share of the wrapped display: the display row its first
+/// chunk starts at and how many wrapped rows it produces. The whole document
+/// is carried as this (offset, count) index instead of the wrapped strings,
+/// so the viewer can skip every row that is not on screen.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct LineLayout {
+    pub(super) first_row: usize,
+    pub(super) rows: usize,
 }
 
 impl TxtView {
@@ -116,35 +126,79 @@ impl TxtView {
         }
     }
 
-    fn build_display(&self, geometry: LayoutGeometry) -> Vec<String> {
-        let mut display = Vec::new();
-
+    /// Index each source line's wrapped display rows as (first row, row count)
+    /// pairs, measuring the wrap with [`wrap_line_ansi_count`] instead of
+    /// building any row strings. The running `first_row` total chained end to
+    /// end *is* the display length, and empty lines still account for one
+    /// blank row, exactly as the pre-index display did.
+    fn build_row_layout(&self, geometry: LayoutGeometry) -> Vec<LineLayout> {
+        let mut layout = Vec::with_capacity(self.line_count());
+        let mut first_row = 0;
         for i in 0..self.line_count() {
-            let line = self.line(i);
-            if line.is_empty() {
-                display.push(self.line_prefix(i, 0));
-            } else {
-                let chunks = wrap_line_ansi(line, geometry.avail, geometry.prefix_width);
-                for (ci, chunk) in chunks.iter().enumerate() {
-                    let mut row = self.line_prefix(i, ci);
-                    row.push_str(chunk);
-                    display.push(row);
-                }
+            #[cfg(test)]
+            {
+                super::test_metrics::bump_wrap();
             }
+            let line = self.line(i);
+            let rows = if line.is_empty() {
+                1
+            } else {
+                wrap_line_ansi_count(line, geometry.avail, geometry.prefix_width)
+            };
+            layout.push(LineLayout { first_row, rows });
+            first_row += rows;
         }
-
-        display
+        layout
     }
 
-    /// Rewrap the document into `display`, deciding scrollbar presence from
-    /// the wrap itself.
+    /// The number of wrapped rows in the current layout: the whole document,
+    /// not just the visible window.
+    pub(super) fn display_len(&self) -> usize {
+        self.row_layout
+            .last()
+            .map_or(0, |entry| entry.first_row + entry.rows)
+    }
+
+    /// Materialize one display row: re-wrap only the source line the row
+    /// falls in and prefix it, so a frame never wraps more than the lines it
+    /// shows. `None` past the document's last row.
+    pub(super) fn display_row(&self, row: usize) -> Option<String> {
+        #[cfg(test)]
+        {
+            super::test_metrics::bump_materialized();
+        }
+        let geometry = self.display_geometry?;
+        let index = self
+            .row_layout
+            .partition_point(|entry| entry.first_row <= row);
+        let entry = self.row_layout.get(index.wrapping_sub(1))?;
+        let chunk_index = row - entry.first_row;
+        if chunk_index >= entry.rows {
+            return None;
+        }
+        let line_index = index - 1;
+        let line = self.line(line_index);
+        // Empty lines produced one prefix-only row during the index build,
+        // mirroring the old display
+        if line.is_empty() {
+            return Some(self.line_prefix(line_index, 0));
+        }
+        let mut row_text = self.line_prefix(line_index, chunk_index);
+        let chunks = wrap_line_ansi(line, geometry.avail, geometry.prefix_width);
+        let chunk = chunks.get(chunk_index)?;
+        row_text.push_str(chunk);
+        Some(row_text)
+    }
+
+    /// Rebuild the row-count index into `row_layout`, deciding scrollbar
+    /// presence from the layout itself.
     ///
-    /// Reserves the scrollbar column before wrapping, so an overflowing
-    /// document (the common large-file case) is wrapped exactly once. The
-    /// column is released, and the text re-wrapped at the full width, only
-    /// when the wrap shows no bar is needed, a cheap pass since a fitting
-    /// document is small. The final `display` always matches the final
-    /// `scrollbar_active`, so the presence check needs no second wrap.
+    /// Reserves the scrollbar column before indexing, so an overflowing
+    /// document (the common large-file case) is indexed exactly once. The
+    /// column is released, and the document re-indexed at the full width,
+    /// only when the layout shows no bar is needed, a cheap pass since a
+    /// fitting document is small. The final layout always matches the final
+    /// `scrollbar_active`, so the presence check needs no second pass.
     fn rebuild_display(&mut self) {
         #[cfg(test)]
         {
@@ -154,7 +208,7 @@ impl TxtView {
         let geometry = self.layout_geometry();
         self.display_geometry = Some(geometry);
         self.wrap_once(geometry);
-        if !ScrollGeometry::room_to_travel(self.display.len(), usize::from(self.visible_rows())) {
+        if !ScrollGeometry::room_to_travel(self.display_len(), usize::from(self.visible_rows())) {
             self.scrollbar_active = false;
             let geometry = self.layout_geometry();
             self.display_geometry = Some(geometry);
@@ -162,14 +216,9 @@ impl TxtView {
         }
     }
 
-    /// Lay out the wrapped `display` rows from a geometry, counting each pass
-    /// in tests so a regression test can pin the single-wrap overflow path.
+    /// Lay out the row-count index from a geometry.
     fn wrap_once(&mut self, geometry: LayoutGeometry) {
-        #[cfg(test)]
-        {
-            super::test_metrics::bump_wrap();
-        }
-        self.display = self.build_display(geometry);
+        self.row_layout = self.build_row_layout(geometry);
     }
 
     fn line_prefix(&self, line_index: usize, chunk_index: usize) -> String {
@@ -188,7 +237,7 @@ impl TxtView {
     /// Reconcile the display model with the current configuration and
     /// viewport size.
     ///
-    /// Rebuilds the wrapped `display` when the geometry changed (resize or
+    /// Rebuilds the row-count index when the geometry changed (resize or
     /// config flip) or the overflow state drifted, then recomputes
     /// `max_offset` and clamps `offset`. All state except the terminal
     /// query behind `term_size`, so it runs before composing a frame and can
@@ -197,14 +246,14 @@ impl TxtView {
     pub(super) fn refresh_bounds(&mut self) {
         self.cell_size = Self::query_size();
         let overflows = self.config.show_scrollbar
-            && ScrollGeometry::room_to_travel(self.display.len(), usize::from(self.visible_rows()));
+            && ScrollGeometry::room_to_travel(self.display_len(), usize::from(self.visible_rows()));
         if overflows != self.scrollbar_active
             || self.display_geometry != Some(self.layout_geometry())
         {
             self.rebuild_display();
         }
         let vr = usize::from(self.visible_rows());
-        self.max_offset = self.display.len().saturating_sub(vr);
+        self.max_offset = self.display_len().saturating_sub(vr);
         self.clamp_offset();
     }
 
@@ -244,7 +293,7 @@ impl TxtView {
             "a reserved bar must have a scroll range"
         );
         let travel = self.max_offset.max(1);
-        let total = self.display.len().max(1);
+        let total = self.display_len().max(1);
 
         let max = visible
             .saturating_sub(ScrollGeometry::MIN_TRAVEL)

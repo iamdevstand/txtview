@@ -12,6 +12,7 @@
 - Scroll line-by-line `↑/↓` or `j/k`, by page `PgUp`/`PgDn`, or with the mouse wheel
 - Jump to the start `Home`/`g` or the end `End`/`G` of the text
 - Automatic line wrapping to the viewport width, with continuation markers on wrapped rows (in the line-number column)
+- Input stored once in a single buffer: lines are indexed by byte offset and the wrapped document exists as a row-count index, with each visible row wrapped on demand while a frame draws, so memory tracks the file and per-frame work tracks the visible window
 - Optional line numbers
 - Optional help bar with keybinding hints
 - Optional interactive vertical scrollbar

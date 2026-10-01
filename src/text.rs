@@ -19,7 +19,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use self::ansi::{Esc, display_width, escape_display, parse_escape};
 use self::wrap::cluster_width_at;
 
-pub(crate) use self::wrap::wrap_line_ansi;
+pub(crate) use self::wrap::{wrap_line_ansi, wrap_line_ansi_count};
 
 /// Write the leading part of a display row that fits in `width` terminal
 /// columns and return the columns written. SGR and OSC8 escapes pass through

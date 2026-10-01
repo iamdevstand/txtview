@@ -35,6 +35,11 @@ impl TxtView {
     /// the most recent draw. The mouse handlers recompose between events,
     /// when no layout-affecting change can have happened since the last draw,
     /// so the composed canvas always agrees with what is on screen.
+    ///
+    /// The content piece draws its rows straight from the viewer's row-count
+    /// index through `display_row`, so a frame materializes (wraps and
+    /// prefixes) only the rows it actually paints. `compose` without
+    /// `render`, the mouse press and drag paths wraps nothing at all.
     pub(super) fn compose(&self) -> Canvas<'_> {
         let cols = self.content_cols();
         let viewport_rows = self.resolved_height();
@@ -50,7 +55,7 @@ impl TxtView {
                 self.drag_grab_offset,
             ));
         }
-        canvas.fill(Content::new(&self.display, self.offset));
+        canvas.fill(Content::new(|row| self.display_row(row), self.offset));
 
         canvas
     }
@@ -257,7 +262,7 @@ mod tests {
     fn compose_grants_a_scrollbar_area_when_and_only_when_the_column_is_reserved() {
         for lines in [5usize, 10, 50, 100] {
             let v = scrolling_viewer(lines, 20, 40);
-            let overflows = v.display.len() > usize::from(v.visible_rows());
+            let overflows = v.display_len() > usize::from(v.visible_rows());
             let granted = v
                 .compose()
                 .areas()

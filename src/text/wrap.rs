@@ -26,6 +26,65 @@ pub(super) fn cluster_width_at(cluster: &str, col: usize) -> usize {
     }
 }
 
+/// Measure the next wrapped piece of `line` starting at byte `i`, which is
+/// the first piece at terminal column `col` of its (possibly fresh) row.
+///
+/// Returns the text to place (SGR and OSC8 sequences raw, every other escape
+/// and control char as visible caret notation), the terminal columns it
+/// occupies, whether it is a tab, the byte offset of the next piece and the
+/// SGR sequence itself when the piece is one, so callers that track
+/// replayable style can fold it into their live state.
+fn measure_piece<'a>(
+    line: &'a str,
+    bytes: &'a [u8],
+    i: usize,
+    col: usize,
+) -> (Cow<'a, str>, usize, bool, usize, Option<&'a str>) {
+    if bytes[i] == 0x1b {
+        let (end, kind) = parse_escape(bytes, i);
+        let seq = &line[i..end];
+        match kind {
+            Esc::Sgr => (Cow::Borrowed(seq), 0, false, end, Some(seq)),
+            Esc::Osc8 => {
+                // OSC8 hyperlinks pass through raw so they render as real
+                // links, emitted as one atomic unit (opener, payload and
+                // terminator together) so a wrap can never split them. OSC
+                // bytes take zero terminal columns, so no width
+                (Cow::Borrowed(seq), 0, false, end, None)
+            }
+            Esc::Visible => {
+                // Any other escape (OSC titles, cursor moves, clears, CSI,
+                // 2-byte) is shown as visible caret notation, like `less`.
+                // It is emitted as one atomic unit: never executed, never
+                // split across a wrap boundary
+                let display = escape_display(seq);
+                let width = display_width(&display);
+                (Cow::Owned(display), width, false, end, None)
+            }
+        }
+    } else {
+        // Process a full extended grapheme cluster together so a wrap can
+        // never split a base char from its combining marks, skin-tone
+        // modifiers, ZWJ sequences or flag pairs
+        let cluster = &line[i..].graphemes(true).next().unwrap_or_default();
+        let is_tab = *cluster == "\t";
+        let end = i + cluster.len();
+        let c = cluster.chars().next().unwrap_or('\u{fffd}');
+        // Map the character to the text placed in the chunk, neutralizing
+        // control bytes so they cannot corrupt the terminal:
+        // - tab keeps its literal byte in the display row (wrapped at
+        //   its 8-column stop, the write layer expands it to spaces),
+        // - C0/C1 controls and DEL become visible caret notation.
+        let replacement: Cow<'_, str> = match c {
+            '\t' => Cow::Borrowed(cluster),
+            c if c.is_control() => Cow::Owned(caret_notation(c)),
+            _ => Cow::Borrowed(cluster),
+        };
+        let ch_width = cluster_width_at(cluster, col);
+        (replacement, ch_width, is_tab, end, None)
+    }
+}
+
 /// Wrap `line` into visual rows of at most `width` terminal columns.
 ///
 /// `start_col` is the width of any prefix the caller renders before the
@@ -55,55 +114,13 @@ pub(crate) fn wrap_line_ansi(line: &str, width: usize, start_col: usize) -> Vec<
 
     let mut i = 0;
     while i < bytes.len() {
-        let (piece, mut piece_width, is_tab, next): (Cow<'_, str>, usize, bool, usize) =
-            if bytes[i] == 0x1b {
-                let (end, kind) = parse_escape(bytes, i);
-                let seq = &line[i..end];
-                match kind {
-                    Esc::Sgr => {
-                        // SGR passes through raw so styling works and is folded
-                        // into the live state for re-emission after a wrap
-                        style.apply(seq);
-                        (Cow::Borrowed(seq), 0, false, end)
-                    }
-                    Esc::Osc8 => {
-                        // OSC8 hyperlinks pass through raw so they render as real
-                        // links, emitted as one atomic unit (opener, payload and
-                        // terminator together) so a wrap can never split them.
-                        // OSC bytes take zero terminal columns, so no width
-                        (Cow::Borrowed(seq), 0, false, end)
-                    }
-                    Esc::Visible => {
-                        // Any other escape (OSC titles, cursor moves, clears, CSI,
-                        // 2-byte) is shown as visible caret notation, like `less`.
-                        // It is emitted as one atomic unit: never executed, never
-                        // split across a wrap boundary
-                        let display = escape_display(seq);
-                        let width = display_width(&display);
-                        (Cow::Owned(display), width, false, end)
-                    }
-                }
-            } else {
-                // Process a full extended grapheme cluster together so a wrap can
-                // never split a base char from its combining marks, skin-tone
-                // modifiers, ZWJ sequences or flag pairs
-                let cluster = &line[i..].graphemes(true).next().unwrap_or_default();
-                let is_tab = *cluster == "\t";
-                let end = i + cluster.len();
-                let c = cluster.chars().next().unwrap_or('\u{fffd}');
-                // Map the character to the text placed in the chunk, neutralizing
-                // control bytes so they cannot corrupt the terminal:
-                // - tab keeps its literal byte in the display row (wrapped at
-                //   its 8-column stop, the write layer expands it to spaces),
-                // - C0/C1 controls and DEL become visible caret notation.
-                let replacement: Cow<'_, str> = match c {
-                    '\t' => Cow::Borrowed(cluster),
-                    c if c.is_control() => Cow::Owned(caret_notation(c)),
-                    _ => Cow::Borrowed(cluster),
-                };
-                let ch_width = cluster_width_at(cluster, start_col + visible_width);
-                (replacement, ch_width, is_tab, end)
-            };
+        let (piece, mut piece_width, is_tab, next, sgr) =
+            measure_piece(line, bytes, i, start_col + visible_width);
+        if let Some(seq) = sgr {
+            // SGR passes through raw so styling works and is folded into the
+            // live state for re-emission after a wrap
+            style.apply(seq);
+        }
         i = next;
         // Once a piece is moved to a fresh row its start column changes, so
         // when a tab is the piece that wrapped its advance has to be measured
@@ -149,6 +166,57 @@ pub(crate) fn wrap_line_ansi(line: &str, width: usize, start_col: usize) -> Vec<
     }
 
     chunks
+}
+
+/// Count the wrapped display rows [`wrap_line_ansi`] would produce for `line`
+/// at a given `width` and `start_col`, without building them.
+///
+/// The measurement is identical: tabs at their 8-column stops, control bytes
+/// and escapes as caret notation, SGR and OSC8 as zero-width, whole grapheme
+/// clusters and a tab that overshoots the width rendering as a spaces row.
+/// Style state is deliberately not tracked: replaying a style prefix on a
+/// fresh row is zero width, so it can never change how many rows a line
+/// produces. Both variants share their piece measurement through
+/// [`measure_piece`], so they cannot drift apart.
+pub(crate) fn wrap_line_ansi_count(line: &str, width: usize, start_col: usize) -> usize {
+    let width = width.max(1);
+    let bytes = line.as_bytes();
+    let mut rows = 0;
+    let mut visible_width = 0;
+    // Whether the current row already holds a piece: the string builder's
+    // `!current_chunk.is_empty()`, tracked as its own flag because a
+    // zero-width piece (a leading SGR) makes the chunk non-empty too, so a
+    // row that only carries inline style still wraps the next overflow
+    let mut row_started = false;
+
+    let mut i = 0;
+    while i < bytes.len() {
+        let (_, mut piece_width, is_tab, next, _) =
+            measure_piece(line, bytes, i, start_col + visible_width);
+        i = next;
+        // Once a piece is moved to a fresh row its start column changes, so
+        // when a tab is the piece that wrapped its advance has to be measured
+        // again from that fresh row's first column
+        if visible_width + piece_width > width && row_started {
+            rows += 1;
+            visible_width = 0;
+            if is_tab {
+                piece_width = TAB_WIDTH - (start_col + visible_width) % TAB_WIDTH;
+            }
+        }
+        if piece_width > width && is_tab {
+            // A tab whose stop lies beyond the whole row renders as spaces
+            // filling the row, exactly like the string-building variant
+            visible_width = width;
+        } else {
+            visible_width += piece_width;
+        }
+        row_started = true;
+    }
+
+    // The final row holds whatever the loop left and an empty line still
+    // produces one (blank) display row, mirroring the builder's `[String::new()]`
+    if row_started { rows + 1 } else { 1 }
 }
 
 /// Visual width of a grapheme cluster. Emoji-presentation sequences carry the
@@ -563,5 +631,59 @@ mod tests {
         assert_eq!(chunks[0], "A日");
         assert_eq!(chunks[1], "本語");
         assert_eq!(chunks[2], "B");
+    }
+
+    #[test]
+    fn count_matches_wrap_line_ansi() {
+        let corpus = [
+            "",
+            "abc",
+            "hello world",
+            "a\tb",
+            "\t",
+            "\t\tx",
+            "abcdefgh\tx",
+            "ab\tcd",
+            "ab\tcd",
+            "abcdefghij",
+            "\x1b[31mhello\x1b[0m",
+            "\x1b[31m12345\x1b[0m",
+            "\x1b[1m\x1b[31mabcdef\x1b[0m",
+            "\x1b[1m\x1b[21m\x1b[4mabcdef\x1b[0m",
+            "一二三四五六七八九十",
+            "🎉🏽👍🇺🇸abc",
+            "e\u{301}x",
+            "a\x07b\x08c\x7fd",
+            "\x1b]8;;https://x.dev\x07here",
+            "abcde\x1b]8;;u\x07fghij",
+            "\x1b[31mabc\x1b]8;;u\x07defgh",
+            "\x1b[2Aab",
+            "\x1b",
+            "a中b",
+            "ab\tcd",
+        ];
+        for line in corpus {
+            for width in 1..=12 {
+                for start_col in [0, 2, 4, 7] {
+                    let counted = wrap_line_ansi_count(line, width, start_col);
+                    let built = wrap_line_ansi(line, width, start_col).len();
+                    assert_eq!(
+                        counted, built,
+                        "count({line:?}, width {width}, start {start_col}) \
+                         must equal the built row count ({built})"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn count_treats_purely_styled_input_as_one_row() {
+        assert_eq!(wrap_line_ansi_count("\x1b[31m\x1b[1m\x1b[0m", 5, 0), 1);
+        assert_eq!(
+            wrap_line_ansi_count("\x1b[31m\x1b[1m", 3, 0),
+            1,
+            "an unterminated style on an empty line still yields one row"
+        );
     }
 }

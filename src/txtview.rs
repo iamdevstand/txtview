@@ -10,7 +10,7 @@ use std::fmt;
 use crate::TxtViewConfig;
 
 use crossterm::terminal;
-use layout::LayoutGeometry;
+use layout::{LayoutGeometry, LineLayout};
 
 /// A terminal text viewer.
 ///
@@ -35,8 +35,11 @@ pub struct TxtView {
     text: String,
     /// Byte offsets of each logical line's start, indexed per `str::lines()`.
     line_starts: Vec<usize>,
-    /// The wrapped display rows currently laid out.
-    display: Vec<String>,
+    /// The wrapped-row layout: each source line's first display row and row
+    /// count. Only this index is kept, the display strings themselves are
+    /// materialized on demand while a frame draws, so the whole re-wrapped
+    /// document is never held in memory.
+    row_layout: Vec<LineLayout>,
     /// The first display row shown, the scroll offset.
     offset: usize,
     /// The largest usable `offset` for the current layout.
@@ -60,12 +63,13 @@ pub struct TxtView {
 
 impl fmt::Debug for TxtView {
     /// Describe the viewer without dumping its contents: the document can be
-    /// huge, and the wrapped `display` rows mirror it. Counts, the scroll
-    /// state, the scrollbar activity and the configuration are shown.
+    /// huge. Counts, the scroll state, the scrollbar activity and the
+    /// configuration are shown. The wrapped rows are materialized on demand
+    /// and never dumped here.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("TxtView")
             .field("line_count", &self.line_starts.len())
-            .field("display_rows", &self.display.len())
+            .field("display_rows", &self.display_len())
             .field("offset", &self.offset)
             .field("max_offset", &self.max_offset)
             .field("scrollbar_active", &self.scrollbar_active)
@@ -96,7 +100,7 @@ impl TxtView {
         let mut view = TxtView {
             text,
             line_starts,
-            display: Vec::new(),
+            row_layout: Vec::new(),
             offset: 0,
             max_offset: 0,
             config: TxtViewConfig::default(),
@@ -262,11 +266,13 @@ mod test_metrics {
     thread_local! {
         static REBUILDS: Cell<usize> = const { Cell::new(0) };
         static WRAPS: Cell<usize> = const { Cell::new(0) };
+        static MATERIALIZED: Cell<usize> = const { Cell::new(0) };
     }
 
     pub(crate) fn reset() {
         REBUILDS.with(|c| c.set(0));
         WRAPS.with(|c| c.set(0));
+        MATERIALIZED.with(|c| c.set(0));
     }
 
     pub(crate) fn bump_rebuild() {
@@ -277,11 +283,19 @@ mod test_metrics {
         WRAPS.with(|c| c.set(c.get() + 1));
     }
 
+    pub(crate) fn bump_materialized() {
+        MATERIALIZED.with(|c| c.set(c.get() + 1));
+    }
+
     pub(crate) fn rebuilds() -> usize {
         REBUILDS.with(Cell::get)
     }
 
     pub(crate) fn wraps() -> usize {
         WRAPS.with(Cell::get)
+    }
+
+    pub(crate) fn materialized() -> usize {
+        MATERIALIZED.with(Cell::get)
     }
 }
