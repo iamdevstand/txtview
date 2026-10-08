@@ -1,10 +1,13 @@
 //! SGR (Select Graphic Rendition) styling state.
 //!
 //! Folds the SGR codes seen in the wrapped line into a live model of the
-//! terminal style, so [`SgrState::to_ansi`] can re-emit a compact prefix at
-//! every wrap boundary.
+//! terminal style, so [`SgrState::write_replay`] can re-emit a compact
+//! prefix at every wrap boundary. The prefix is written straight into the
+//! caller's buffer and only when the style is active, an unstyled
+//! boundary costs nothing and can never emit a stray reset.
 
 use std::collections::BTreeSet;
+use std::fmt::Write;
 
 // SGR parameter codes for the style state machine (ECMA-48 / ITU-T T.416).
 const SGR_RESET: u8 = 0;
@@ -79,6 +82,14 @@ impl Param {
             Param::Empty => "0".to_string(),
         }
     }
+}
+
+/// One fragment of a replayed prefix: a numeric SGR parameter formatted
+/// in place or a stored color/unknown-code string pushed verbatim.
+/// The emission-side counterpart to the parse-side [`Param`].
+enum Fragment<'a> {
+    Num(u8),
+    Text(&'a str),
 }
 
 /// Live styling state folded from the SGR codes seen so far.
@@ -320,32 +331,63 @@ impl SgrState {
         }
     }
 
-    /// The canonical SGR string re-opening this style, or `None` when
-    /// nothing is styled.
-    pub(super) fn to_ansi(&self) -> Option<String> {
-        let mut codes = Vec::with_capacity(5);
-        for a in &self.attrs {
-            codes.push(a.to_string());
+    /// Every code this state would replay, in canonical order: attributes,
+    /// font, unknown codes, foreground, background, underline color. The
+    /// one place the replayed field set is enumerated, [`Self::is_active`]
+    /// and the code writer both derive from it, so they can never disagree,
+    /// and a new state field needs exactly one chain line here plus its
+    /// handling in [`Self::apply`].
+    fn fragments(&self) -> impl Iterator<Item = Fragment<'_>> {
+        self.attrs
+            .iter()
+            .map(|&a| Fragment::Num(a))
+            .chain(self.font.map(Fragment::Num))
+            .chain(self.other.iter().map(|o| Fragment::Text(o.as_str())))
+            .chain(self.fg.as_deref().map(Fragment::Text))
+            .chain(self.bg.as_deref().map(Fragment::Text))
+            .chain(self.ulcolor.as_deref().map(Fragment::Text))
+    }
+
+    /// Whether any style field would contribute a code to a replayed
+    /// prefix. [`Self::write_replay`] gates on it and the wrapper consults
+    /// it for the closing reset, so an unstyled wrap boundary skips the
+    /// emission work entirely.
+    pub(super) fn is_active(&self) -> bool {
+        self.fragments().next().is_some()
+    }
+
+    /// Append this state's framed replay (`ESC [ ... m`) to `out` and
+    /// return `true` or append nothing at all and return `false` when no
+    /// style is active. The gating lives here so a caller can never emit an
+    /// empty `ESC [m`, which terminals read as a full reset, and the codes
+    /// are formatted straight into the caller's buffer, so a wrap boundary
+    /// allocates nothing beyond growing the row the replay lands in.
+    pub(super) fn write_replay(&self, out: &mut String) -> bool {
+        if !self.is_active() {
+            return false;
         }
-        if let Some(f) = self.font {
-            codes.push(f.to_string());
+        out.push_str("\x1b[");
+        self.write_codes(out);
+        out.push('m');
+        true
+    }
+
+    /// Append this state's SGR parameters to `out`, `;`-separated in the
+    /// canonical order, with no frame. Private to the module: emission goes
+    /// through [`Self::write_replay`], which owns the framing and the
+    /// active-state gate.
+    fn write_codes(&self, out: &mut String) {
+        let mut sep = "";
+        for fragment in self.fragments() {
+            out.push_str(sep);
+            match fragment {
+                Fragment::Num(n) => {
+                    let _ = write!(out, "{n}");
+                }
+                Fragment::Text(s) => out.push_str(s),
+            }
+            sep = ";";
         }
-        for o in &self.other {
-            codes.push(o.clone());
-        }
-        if let Some(f) = &self.fg {
-            codes.push(f.clone());
-        }
-        if let Some(b) = &self.bg {
-            codes.push(b.clone());
-        }
-        if let Some(u) = &self.ulcolor {
-            codes.push(u.clone());
-        }
-        if codes.is_empty() {
-            return None;
-        }
-        Some(format!("\x1b[{}m", codes.join(";")))
     }
 
     /// Reset to the default style: every attribute, color and font dropped.
@@ -367,12 +409,25 @@ impl SgrState {
 mod tests {
     use super::*;
 
+    /// The replayed prefix for a state, produced by the production
+    /// emission method itself: the frame and the active-state gate are
+    /// [`SgrState::write_replay`]'s, not re-implemented here.
+    fn replay(s: &SgrState) -> Option<String> {
+        let mut out = String::new();
+        if s.write_replay(&mut out) {
+            Some(out)
+        } else {
+            assert!(out.is_empty());
+            None
+        }
+    }
+
     fn state(codes: &[&str]) -> Option<String> {
         let mut s = SgrState::default();
         for c in codes {
             s.apply(c);
         }
-        s.to_ansi()
+        replay(&s)
     }
 
     #[test]

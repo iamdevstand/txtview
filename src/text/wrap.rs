@@ -126,16 +126,13 @@ pub(crate) fn wrap_line_ansi(line: &str, width: usize, start_col: usize) -> Vec<
         // when a tab is the piece that wrapped its advance has to be measured
         // again from that fresh row's first column
         if visible_width + piece_width > width && !current_chunk.is_empty() {
-            let prefix = style.to_ansi();
-            if prefix.is_some() {
+            if style.is_active() {
                 current_chunk.push_str("\x1b[0m");
             }
             chunks.push(current_chunk);
             current_chunk = String::new();
             visible_width = 0;
-            if let Some(prefix) = prefix {
-                current_chunk.push_str(&prefix);
-            }
+            style.write_replay(&mut current_chunk);
             if is_tab {
                 piece_width = TAB_WIDTH - (start_col + visible_width) % TAB_WIDTH;
             }
@@ -155,7 +152,7 @@ pub(crate) fn wrap_line_ansi(line: &str, width: usize, start_col: usize) -> Vec<
     }
 
     if !current_chunk.is_empty() {
-        if style.to_ansi().is_some() {
+        if style.is_active() {
             current_chunk.push_str("\x1b[0m");
         }
         chunks.push(current_chunk);

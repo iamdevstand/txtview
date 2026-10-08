@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Style replay at a wrap boundary no longer allocates when nothing is styled: the SGR state answers `is_active` before anything is built and writes its codes straight into the new row instead of an intermediate parameter string, so wrapping a long line costs a small constant number of allocations per row instead of one extra allocation per boundary.
 - The wrapped document is no longer materialized up front. A per-source-line row-count index (`row_layout`) replaces the full `Vec<String>` display and each visible row is wrapped on demand through an index lookup while a frame draws, so construction cost and memory track the document while per-frame wrap work tracks the visible window. Scrolling and mouse hit-testing wrap nothing at all.
 - The content piece renders straight from a row provider that materializes one display row at a time, so a frame allocates a single row string instead of a windowful of pre-wrapped rows.
 - Every control character in wrapped rows measures as exactly two columns, so the wrapping width can no longer be misread as leaving one column for some controls.
