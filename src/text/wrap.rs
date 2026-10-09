@@ -316,6 +316,12 @@ pub(crate) fn wrap_line_ansi_count(line: &str, width: usize, start_col: usize) -
 /// for rendering at double width in modern terminals; `unicode-width` keeps
 /// the base char's text width, so bump those clusters to two columns.
 pub(super) fn cluster_visual_width(cluster: &str) -> usize {
+    if cluster.len() == 1 {
+        let b = cluster.as_bytes()[0];
+        if (0x20..=0x7e).contains(&b) {
+            return 1;
+        }
+    }
     let width = display_width(cluster);
     if cluster.contains('\u{fe0f}') || cluster.contains('\u{20e3}') {
         width.max(2)
