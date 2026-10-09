@@ -4,7 +4,7 @@
 use super::TxtView;
 use crate::components::HelpBar;
 use crate::components::scrollbar::ScrollGeometry;
-use crate::text::{wrap_line_ansi, wrap_line_ansi_count};
+use crate::text::{WrappedLine, wrap_line_ansi, wrap_line_ansi_count};
 
 /// The geometry the wrapped display is produced from: the columns available
 /// to the text and the width of the line-number prefix. Carried as a named
@@ -159,9 +159,12 @@ impl TxtView {
             .map_or(0, |entry| entry.first_row + entry.rows)
     }
 
-    /// Materialize one display row: re-wrap only the source line the row
-    /// falls in and prefix it, so a frame never wraps more than the lines it
-    /// shows. `None` past the document's last row.
+    /// Materialize one display row: scan only the source line the row falls
+    /// in and prefix it, so a frame wraps exactly the rows it shows, the scan
+    /// skips every row before the target without building any of them, so a
+    /// deep row of a long line costs one row build at the cost of measuring
+    /// the rows it skips, never a whole-line wrap. `None` past the document's
+    /// last row.
     pub(super) fn display_row(&self, row: usize) -> Option<String> {
         #[cfg(test)]
         {
@@ -184,9 +187,15 @@ impl TxtView {
             return Some(self.line_prefix(line_index, 0));
         }
         let mut row_text = self.line_prefix(line_index, chunk_index);
-        let chunks = wrap_line_ansi(line, geometry.avail, geometry.prefix_width);
-        let chunk = chunks.get(chunk_index)?;
-        row_text.push_str(chunk);
+        let mut scan = WrappedLine::new(line, geometry.avail, geometry.prefix_width);
+        let mut chunk = String::new();
+        // A row inside the indexed count must always be reachable. If the
+        // count and the materializer ever disagree, paint nothing rather than
+        // the wrong row.
+        if scan.skip_to(chunk_index) != chunk_index || !scan.next(&mut chunk) {
+            return None;
+        }
+        row_text.push_str(&chunk);
         Some(row_text)
     }
 

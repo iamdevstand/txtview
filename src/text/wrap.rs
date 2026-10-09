@@ -85,6 +85,184 @@ fn measure_piece<'a>(
     }
 }
 
+/// A resumable scan of one line's wrapped display rows.
+///
+/// [`next`](WrappedLine::next) materializes one display row at a time into a
+/// caller-provided buffer and [`skip_to`](WrappedLine::skip_to) advances past
+/// rows without building them, so the layout can produce exactly the one row
+/// it paints instead of the line's whole `Vec`. [`wrap_line_ansi`] and
+/// [`wrap_line_ansi_count`] are thin loops over this same scan, so the row
+/// boundaries, the tab-overflow substitution and the style replay live in one
+/// place and the count can never drift from the build. A row this scan
+/// produces is byte-identical to the matching entry [`wrap_line_ansi`]
+/// builds.
+pub(crate) struct WrappedLine<'a> {
+    line: &'a str,
+    bytes: &'a [u8],
+    width: usize,
+    start_col: usize,
+    /// Byte offset of the next piece to measure.
+    i: usize,
+    /// The style folded through every SGR processed so far, replayed as the
+    /// next row's opening prefix.
+    style: SgrState,
+    /// The piece that overflowed the previous row, placed at the top of the
+    /// fresh row it started. A wrapped tab's width is already re-measured
+    /// from the fresh row's first column.
+    pending: Option<(Cow<'a, str>, usize, bool)>,
+    /// Every piece is consumed and the last row emitted.
+    exhausted: bool,
+}
+
+impl<'a> WrappedLine<'a> {
+    pub(crate) fn new(line: &'a str, width: usize, start_col: usize) -> Self {
+        WrappedLine {
+            line,
+            bytes: line.as_bytes(),
+            width: width.max(1),
+            start_col,
+            i: 0,
+            style: SgrState::default(),
+            pending: None,
+            exhausted: false,
+        }
+    }
+
+    /// Replace `out`'s contents with the next display row and return `true`,
+    /// `false` once the line is exhausted, after which the scan emits nothing
+    /// more and `out` is left unchanged.
+    pub(crate) fn next(&mut self, out: &mut String) -> bool {
+        self.next_row(Some(out))
+    }
+
+    /// Advance past `target` display rows without building them, returning
+    /// how many rows were skipped. Style keeps being folded and wrapped tabs
+    /// stay re-measured while skipping, so a row read afterwards replays and
+    /// measures exactly as if the skipped rows had been built.
+    pub(crate) fn skip_to(&mut self, target: usize) -> usize {
+        let mut skipped = 0;
+        while skipped < target && self.skip_one() {
+            skipped += 1;
+        }
+        skipped
+    }
+
+    /// Consume the remaining rows, counting them without building them.
+    fn count_rows(&mut self) -> usize {
+        let mut rows = 0;
+        while self.skip_one() {
+            rows += 1;
+        }
+        rows
+    }
+
+    /// Skip the next display row without producing it, `false` at the end.
+    fn skip_one(&mut self) -> bool {
+        self.next_row(None)
+    }
+
+    /// Produce exactly one display row: written to `out` when present,
+    /// otherwise consumed without output. Both paths run the same scan with
+    /// the same boundary decision, tab-overflow substitution, style folding
+    /// and re-measurement, so a skipped row costs what measuring a row
+    /// costs, never what building one does.
+    fn next_row(&mut self, mut out: Option<&mut String>) -> bool {
+        if self.exhausted {
+            return false;
+        }
+        if let Some(out) = &mut out {
+            out.clear();
+        }
+        let mut row_started = false;
+        let mut visible_width = 0;
+        // A fresh row opens with its folded style replayed, exactly as the
+        // builder seeds a chunk at a wrap boundary. The first row gets no
+        // prefix because the scan starts in the default style.
+        if self.style.is_active() {
+            row_started = true;
+            if let Some(out) = &mut out {
+                self.style.write_replay(out);
+            }
+        }
+
+        loop {
+            let (piece, piece_width, is_tab) = match self.pending.take() {
+                // A piece that overflowed the previous row was measured and
+                // folded there, on the row it started it is placed without a
+                // second boundary decision, exactly like the builder
+                Some(pending) => pending,
+                None => {
+                    if self.i >= self.bytes.len() {
+                        // End of the line: a row that holds anything is
+                        // flushed with its closing reset. One that holds
+                        // nothing ends the scan
+                        if !row_started {
+                            self.exhausted = true;
+                            return false;
+                        }
+                        if self.style.is_active() {
+                            if let Some(out) = &mut out {
+                                out.push_str("\x1b[0m");
+                            }
+                        }
+                        self.exhausted = true;
+                        return true;
+                    }
+                    let (piece, piece_width, is_tab, next, sgr) = measure_piece(
+                        self.line,
+                        self.bytes,
+                        self.i,
+                        self.start_col + visible_width,
+                    );
+                    self.i = next;
+                    if let Some(seq) = sgr {
+                        self.style.apply(seq);
+                    }
+                    if visible_width + piece_width > self.width && row_started {
+                        // The piece overflows the row it landed in: close the
+                        // row and start a fresh one with it, re-measuring a
+                        // wrapped tab from the fresh row's first column
+                        if self.style.is_active() {
+                            if let Some(out) = &mut out {
+                                out.push_str("\x1b[0m");
+                            }
+                        }
+                        // `visible_width` is 0 on the fresh row, so the tab
+                        // re-measure lands on the row's first column stop
+                        let width = if is_tab {
+                            TAB_WIDTH - self.start_col % TAB_WIDTH
+                        } else {
+                            piece_width
+                        };
+                        self.pending = Some((piece, width, is_tab));
+                        return true;
+                    }
+                    (piece, piece_width, is_tab)
+                }
+            };
+
+            if piece_width > self.width && is_tab {
+                // A tab whose stop lies beyond the whole row cannot reach it,
+                // so it renders as spaces filling the row and never pushes
+                // the cursor past the wrap width. Grapheme clusters stay
+                // whole even when wider than the width (they cannot be
+                // split), so only tabs get this substitution
+                if let Some(out) = &mut out {
+                    out.push_str(&" ".repeat(self.width));
+                }
+                visible_width = self.width;
+                row_started = true;
+            } else {
+                if let Some(out) = &mut out {
+                    out.push_str(&piece);
+                }
+                visible_width += piece_width;
+                row_started = true;
+            }
+        }
+    }
+}
+
 /// Wrap `line` into visual rows of at most `width` terminal columns.
 ///
 /// `start_col` is the width of any prefix the caller renders before the
@@ -105,57 +283,11 @@ fn measure_piece<'a>(
 ///   to spaces, so a tab byte itself never reaches the terminal
 ///   ([`write_visible_row`](super::write_visible_row)).
 pub(crate) fn wrap_line_ansi(line: &str, width: usize, start_col: usize) -> Vec<String> {
-    let width = width.max(1);
-    let bytes = line.as_bytes();
     let mut chunks = Vec::new();
-    let mut current_chunk = String::new();
-    let mut visible_width = 0;
-    let mut style = SgrState::default();
-
-    let mut i = 0;
-    while i < bytes.len() {
-        let (piece, mut piece_width, is_tab, next, sgr) =
-            measure_piece(line, bytes, i, start_col + visible_width);
-        if let Some(seq) = sgr {
-            // SGR passes through raw so styling works and is folded into the
-            // live state for re-emission after a wrap
-            style.apply(seq);
-        }
-        i = next;
-        // Once a piece is moved to a fresh row its start column changes, so
-        // when a tab is the piece that wrapped its advance has to be measured
-        // again from that fresh row's first column
-        if visible_width + piece_width > width && !current_chunk.is_empty() {
-            if style.is_active() {
-                current_chunk.push_str("\x1b[0m");
-            }
-            chunks.push(current_chunk);
-            current_chunk = String::new();
-            visible_width = 0;
-            style.write_replay(&mut current_chunk);
-            if is_tab {
-                piece_width = TAB_WIDTH - (start_col + visible_width) % TAB_WIDTH;
-            }
-        }
-        if piece_width > width && is_tab {
-            // A tab whose stop lies beyond the whole row cannot reach it, so
-            // it renders as spaces filling the row and never pushes the
-            // cursor past the wrap width. Grapheme clusters stay whole even
-            // when wider than the width (they cannot be split), so only tabs
-            // get this substitution
-            current_chunk.push_str(&" ".repeat(width));
-            visible_width = width;
-        } else {
-            current_chunk.push_str(&piece);
-            visible_width += piece_width;
-        }
-    }
-
-    if !current_chunk.is_empty() {
-        if style.is_active() {
-            current_chunk.push_str("\x1b[0m");
-        }
-        chunks.push(current_chunk);
+    let mut scan = WrappedLine::new(line, width, start_col);
+    let mut row = String::new();
+    while scan.next(&mut row) {
+        chunks.push(std::mem::take(&mut row));
     }
 
     if chunks.is_empty() {
@@ -168,52 +300,15 @@ pub(crate) fn wrap_line_ansi(line: &str, width: usize, start_col: usize) -> Vec<
 /// Count the wrapped display rows [`wrap_line_ansi`] would produce for `line`
 /// at a given `width` and `start_col`, without building them.
 ///
-/// The measurement is identical: tabs at their 8-column stops, control bytes
-/// and escapes as caret notation, SGR and OSC8 as zero-width, whole grapheme
-/// clusters and a tab that overshoots the width rendering as a spaces row.
-/// Style state is deliberately not tracked: replaying a style prefix on a
-/// fresh row is zero width, so it can never change how many rows a line
-/// produces. Both variants share their piece measurement through
-/// [`measure_piece`], so they cannot drift apart.
+/// The count is [`WrappedLine`]'s own scan run in build-less mode: the same
+/// boundary and tab-overflow decisions as the building path, with the style
+/// folded rather than emitted. A fresh-row style prefix is zero width, so
+/// counting and building through one state machine can never disagree.
+/// Skipping rows costs what measuring them costs, never what building does.
 pub(crate) fn wrap_line_ansi_count(line: &str, width: usize, start_col: usize) -> usize {
-    let width = width.max(1);
-    let bytes = line.as_bytes();
-    let mut rows = 0;
-    let mut visible_width = 0;
-    // Whether the current row already holds a piece: the string builder's
-    // `!current_chunk.is_empty()`, tracked as its own flag because a
-    // zero-width piece (a leading SGR) makes the chunk non-empty too, so a
-    // row that only carries inline style still wraps the next overflow
-    let mut row_started = false;
-
-    let mut i = 0;
-    while i < bytes.len() {
-        let (_, mut piece_width, is_tab, next, _) =
-            measure_piece(line, bytes, i, start_col + visible_width);
-        i = next;
-        // Once a piece is moved to a fresh row its start column changes, so
-        // when a tab is the piece that wrapped its advance has to be measured
-        // again from that fresh row's first column
-        if visible_width + piece_width > width && row_started {
-            rows += 1;
-            visible_width = 0;
-            if is_tab {
-                piece_width = TAB_WIDTH - (start_col + visible_width) % TAB_WIDTH;
-            }
-        }
-        if piece_width > width && is_tab {
-            // A tab whose stop lies beyond the whole row renders as spaces
-            // filling the row, exactly like the string-building variant
-            visible_width = width;
-        } else {
-            visible_width += piece_width;
-        }
-        row_started = true;
-    }
-
-    // The final row holds whatever the loop left and an empty line still
-    // produces one (blank) display row, mirroring the builder's `[String::new()]`
-    if row_started { rows + 1 } else { 1 }
+    // An empty line still produces one blank display row, mirroring the
+    // builder's `[String::new()]` fallback
+    WrappedLine::new(line, width, start_col).count_rows().max(1)
 }
 
 /// Visual width of a grapheme cluster. Emoji-presentation sequences carry the
@@ -632,34 +727,7 @@ mod tests {
 
     #[test]
     fn count_matches_wrap_line_ansi() {
-        let corpus = [
-            "",
-            "abc",
-            "hello world",
-            "a\tb",
-            "\t",
-            "\t\tx",
-            "abcdefgh\tx",
-            "ab\tcd",
-            "ab\tcd",
-            "abcdefghij",
-            "\x1b[31mhello\x1b[0m",
-            "\x1b[31m12345\x1b[0m",
-            "\x1b[1m\x1b[31mabcdef\x1b[0m",
-            "\x1b[1m\x1b[21m\x1b[4mabcdef\x1b[0m",
-            "一二三四五六七八九十",
-            "🎉🏽👍🇺🇸abc",
-            "e\u{301}x",
-            "a\x07b\x08c\x7fd",
-            "\x1b]8;;https://x.dev\x07here",
-            "abcde\x1b]8;;u\x07fghij",
-            "\x1b[31mabc\x1b]8;;u\x07defgh",
-            "\x1b[2Aab",
-            "\x1b",
-            "a中b",
-            "ab\tcd",
-        ];
-        for line in corpus {
+        for line in scan_corpus() {
             for width in 1..=12 {
                 for start_col in [0, 2, 4, 7] {
                     let counted = wrap_line_ansi_count(line, width, start_col);
@@ -682,5 +750,125 @@ mod tests {
             1,
             "an unterminated style on an empty line still yields one row"
         );
+    }
+
+    #[test]
+    fn count_anchors_pin_literal_rows() {
+        assert_eq!(wrap_line_ansi_count("abc", 3, 0), 1);
+        assert_eq!(wrap_line_ansi_count("abcdefghij", 3, 0), 4);
+        assert_eq!(
+            wrap_line_ansi_count("ab\tcdef", 4, 0),
+            3,
+            "a tab padding a row to the exact width still counts the wrap"
+        );
+        assert_eq!(
+            wrap_line_ansi_count("\x1b[31m12345\x1b[0m", 3, 0),
+            2,
+            "a styled row replaying on the next row still counts it"
+        );
+        assert_eq!(
+            wrap_line_ansi_count("\x1b[31mabcd\tef\x1b[0m", 8, 0),
+            2,
+            "matches the pinned builder output for the same input"
+        );
+    }
+
+    /// Inputs for the scan checks and the count cross-check: styled and plain
+    /// text, tabs, wide graphemes, control bytes and OSC8 hyperlinks, across
+    /// a spread of widths and prefixes.
+    fn scan_corpus() -> [&'static str; 25] {
+        [
+            "",
+            "abc",
+            "hello world",
+            "a\tb",
+            "\t",
+            "\t\tx",
+            "abcdefgh\tx",
+            "ab\tcd",
+            "abcdefghij",
+            "\x1b[31mhello\x1b[0m",
+            "\x1b[31m12345\x1b[0m",
+            "\x1b[1m\x1b[31mabcdef\x1b[0m",
+            "\x1b[1m\x1b[21m\x1b[4mabcdef\x1b[0m",
+            "一二三四五六七八九十",
+            "🎉🏽👍🇺🇸abc",
+            "e\u{301}x",
+            "a\x07b\x08c\x7fd",
+            "\x1b]8;;https://x.dev\x07here",
+            "abcde\x1b]8;;u\x07fghij",
+            "\x1b[31mabc\x1b]8;;u\x07defgh",
+            "\x1b[2Aab",
+            "\x1b",
+            "a中b",
+            "\x1b[31ma\tb\x1b[0m",
+            "🎉\t🎉",
+        ]
+    }
+
+    #[test]
+    fn scan_pins_literal_rows() {
+        let mut row = String::new();
+        let mut scan = WrappedLine::new("hello world", 5, 0);
+        assert!(scan.next(&mut row));
+        assert_eq!(row, "hello");
+        assert!(scan.next(&mut row));
+        assert_eq!(row, " worl");
+        assert!(scan.next(&mut row));
+        assert_eq!(row, "d");
+        assert!(!scan.next(&mut row), "the last row exhausts the scan");
+
+        let mut scan = WrappedLine::new("a中b", 3, 0);
+        assert!(scan.next(&mut row));
+        assert_eq!(row, "a中");
+        assert!(scan.next(&mut row));
+        assert_eq!(row, "b");
+
+        let mut scan = WrappedLine::new("e\u{301}x", 4, 0);
+        assert!(scan.next(&mut row));
+        assert_eq!(
+            row, "e\u{301}x",
+            "combining marks travel with their base char"
+        );
+
+        let mut scan = WrappedLine::new("", 5, 0);
+        assert!(!scan.next(&mut row), "an empty line produces no scan row");
+    }
+
+    #[test]
+    fn skip_then_next_reaches_each_built_row() {
+        for line in scan_corpus() {
+            for width in 1..=12 {
+                for start_col in [0, 2, 4, 7] {
+                    let built = wrap_line_ansi(line, width, start_col);
+                    for (k, expected) in built.iter().enumerate() {
+                        let mut scan = WrappedLine::new(line, width, start_col);
+                        assert_eq!(
+                            scan.skip_to(k),
+                            k,
+                            "skipping {k} rows must land on row {k} of {line:?}"
+                        );
+                        let mut row = String::new();
+                        let present = scan.next(&mut row);
+                        if line.is_empty() {
+                            assert!(
+                                !present,
+                                "an empty line has no scan row {k}; the blank row is \
+                                 the builder's `[String::new()]` fallback"
+                            );
+                        } else {
+                            assert!(
+                                present,
+                                "row {k} must still be materializable after the skip"
+                            );
+                            assert_eq!(
+                                &row, expected,
+                                "row {k} after skip_to must equal the built row ({expected:?})"
+                            );
+                        }
+                    }
+                }
+            }
+        }
     }
 }
