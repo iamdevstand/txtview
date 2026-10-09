@@ -6,6 +6,12 @@ use crate::components::HelpBar;
 use crate::components::scrollbar::ScrollGeometry;
 use crate::text::{WrappedLine, wrap_line_ansi, wrap_line_ansi_count};
 
+/// The decimal digit count of `n`, allocation-free. `decimals(0)` is `1`,
+/// so a zero value still counts a digit.
+pub(super) fn decimals(n: usize) -> usize {
+    if n == 0 { 1 } else { n.ilog10() as usize + 1 }
+}
+
 /// The geometry the wrapped display is produced from: the columns available
 /// to the text and the width of the line-number prefix. Carried as a named
 /// struct so the two values cannot be swapped in a call.
@@ -91,7 +97,7 @@ impl TxtView {
     /// are off.
     fn prefix_width(&self) -> usize {
         if self.config.show_line_numbers {
-            self.line_count().to_string().len() + 3
+            decimals(self.line_count()) + 3
         } else {
             0
         }
@@ -234,7 +240,7 @@ impl TxtView {
         if !self.config.show_line_numbers {
             return String::new();
         }
-        let width = self.line_count().to_string().len();
+        let width = decimals(self.line_count());
         let label = if chunk_index == 0 {
             (line_index + 1).to_string()
         } else {

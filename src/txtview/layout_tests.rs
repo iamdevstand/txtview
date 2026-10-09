@@ -4,7 +4,15 @@
 use crate::TxtViewConfig;
 
 use super::TxtView;
+use super::layout::decimals;
 use super::test_metrics::{materialized, rebuilds, reset, wraps};
+
+#[test]
+fn decimals_matches_to_string_len() {
+    for n in [0, 1, 9, 10, 99, 100, 1_000, 12_345, usize::MAX] {
+        assert_eq!(decimals(n), n.to_string().len(), "digit count of {n}");
+    }
+}
 
 /// The whole wrapped document as the old `display` produced it, so the
 /// existing assertions still pin row-for-row output while the viewer itself
