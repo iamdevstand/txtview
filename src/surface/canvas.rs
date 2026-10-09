@@ -16,9 +16,8 @@ use super::{Area, Component, Gesture, Request};
 /// added with [`Canvas::fill`]: it takes whatever the canvas still holds, and
 /// the canvas guarantees it can never be squeezed away entirely.
 pub(crate) struct Canvas<'a> {
-    width: u16,
-    height: u16,
     pieces: Vec<Piece<'a>>,
+    free_box: Area,
 }
 
 /// A component the canvas owns, with the area granted to it.
@@ -37,9 +36,13 @@ impl<'a> Canvas<'a> {
     /// placed in it.
     pub(crate) fn new(width: u16, height: u16) -> Canvas<'a> {
         Canvas {
-            width,
-            height,
             pieces: Vec::new(),
+            free_box: Area {
+                col: 0,
+                row: 0,
+                width,
+                height,
+            },
         }
     }
 
@@ -60,24 +63,33 @@ impl<'a> Canvas<'a> {
     /// would lose the top-left corner the model builds on. A piece that
     /// violates this is a bug in the piece, caught by the debug assertion.
     pub(crate) fn place(&mut self, component: impl Component + 'a) -> Area {
-        let free = self.free_box();
+        let free = self.free_box;
         let mut granted = component.area(free);
-        if granted.row + granted.height == free.row + free.height && granted.width == free.width {
-            let mut probe = self.areas();
-            probe.push(granted);
-            let squeezed = free_box_of(&probe, self.width, self.height);
+        let spans_full_w = granted.width == free.width;
+        let spans_full_h = granted.height == free.height;
+        if (spans_full_w || spans_full_h) && (granted.height > 0 || granted.width > 0) {
+            // Bar spanning full width OR full height: check if it would squeeze content below floor
+            let mut test_granted = granted;
+            let mut squeezed = Self::carve_free_box(free, test_granted);
             if squeezed.height < CONTENT_FLOOR {
                 let deficit = CONTENT_FLOOR.saturating_sub(squeezed.height);
-                granted.height = granted.height.saturating_sub(deficit);
-                granted.row = free.row + free.height - granted.height;
+                test_granted.height = test_granted.height.saturating_sub(deficit);
+                test_granted.row = free.row + free.height - test_granted.height;
+                squeezed = Self::carve_free_box(free, test_granted);
             }
+            if spans_full_h && squeezed.width < 1 {
+                // Vertical bar squeezing content horizontally (not expected but handle)
+                let deficit = 1u16.saturating_sub(squeezed.width);
+                test_granted.width = test_granted.width.saturating_sub(deficit);
+                test_granted.col = free.col + free.width - test_granted.width;
+            }
+            granted = test_granted;
         }
         debug_assert!(
-            granted.is_empty()
-                || granted.row + granted.height == free.row + free.height
-                || granted.col + granted.width == free.col + free.width,
-            "a piece must anchor its footprint to the free box's bottom or right edge"
+            granted.is_empty() || granted.width == free.width || granted.height == free.height,
+            "component must span full width OR full height (or both)"
         );
+        self.free_box = Self::carve_free_box(free, granted);
         self.pieces.push(Piece {
             component: Box::new(component),
             area: granted,
@@ -92,7 +104,13 @@ impl<'a> Canvas<'a> {
     /// draws in whatever free cells they left. Placing another component after
     /// the fill leaves it nothing to grant.
     pub(crate) fn fill(&mut self, component: impl Component + 'a) -> Area {
-        let area = self.free_box();
+        let area = self.free_box;
+        self.free_box = Area {
+            col: 0,
+            row: 0,
+            width: 0,
+            height: 0,
+        };
         self.pieces.push(Piece {
             component: Box::new(component),
             area,
@@ -109,6 +127,7 @@ impl<'a> Canvas<'a> {
         Ok(())
     }
 
+    #[cfg(test)]
     /// The areas the pieces were granted, in the order they were added: the
     /// single source of truth for what each component may paint and where the
     /// mouse lands on it.
@@ -144,43 +163,69 @@ impl<'a> Canvas<'a> {
         })
     }
 
-    /// The rectangle of cells no placed component covers, anchored to the
-    /// canvas's top-left corner.
-    fn free_box(&self) -> Area {
-        free_box_of(&self.areas(), self.width, self.height)
-    }
-}
+    /// Carve a granted area from the free box, returning the new free box.
+    /// Assumes granted is within free and spans full width OR full height
+    /// (or both, for a greedy piece that yields to CONTENT_FLOOR).
+    fn carve_free_box(free: Area, granted: Area) -> Area {
+        let spans_full_w = granted.width == free.width;
+        let spans_full_h = granted.height == free.height;
 
-/// The rectangle of cells `allocated` does not cover, anchored to the box's
-/// top-left corner: walking rows from the top, the free width narrows at the
-/// first occupied cell and stops at the first row without a free cell.
-fn free_box_of(allocated: &[Area], width: u16, height: u16) -> Area {
-    let mut free_width = width;
-    let mut free_height = 0;
-    'rows: for y in 0..height {
-        for x in 0..free_width {
-            if covers(allocated, x, y) {
-                if x == 0 {
-                    break 'rows;
+        debug_assert!(
+            granted.is_empty() || spans_full_w || spans_full_h,
+            "carve_free_box requires granted to span full width or full height"
+        );
+
+        if spans_full_w && spans_full_h {
+            // Greedy piece spanning both dimensions
+            if granted.row == free.row {
+                // Top edge - carve down
+                Area {
+                    row: granted.row + granted.height,
+                    height: free.height - granted.height,
+                    ..free
                 }
-                free_width = x;
-                break;
+            } else {
+                // Bottom edge (or middle, treat as bottom bar)
+                Area {
+                    height: granted.row - free.row,
+                    ..free
+                }
+            }
+        } else if spans_full_w {
+            // Horizontal bar, carves vertically
+            if granted.row == free.row {
+                // Top bar
+                Area {
+                    row: granted.row + granted.height,
+                    height: free.height - granted.height,
+                    ..free
+                }
+            } else {
+                // Bottom bar (must touch bottom)
+                Area {
+                    height: granted.row - free.row,
+                    ..free
+                }
+            }
+        } else {
+            // Vertical bar, carves horizontally (spans_full_h must be true)
+            if granted.col == free.col {
+                // Left bar
+                Area {
+                    col: granted.col + granted.width,
+                    width: free.width - granted.width,
+                    ..free
+                }
+            } else {
+                // Right bar (must touch right)
+                Area {
+                    width: granted.col - free.col,
+                    ..free
+                }
             }
         }
-        free_height += 1;
-    }
-    Area {
-        col: 0,
-        row: 0,
-        width: free_width,
-        height: free_height,
     }
 }
-
-fn covers(allocated: &[Area], x: u16, y: u16) -> bool {
-    allocated.iter().any(|area| area.contains(x, y))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -328,7 +373,7 @@ mod tests {
     }
 
     fn box_area_footprint(_nothing: u8) -> (u16, u16, Anchor) {
-        (10, 1, Anchor::BottomLeft)
+        (COLS, 1, Anchor::BottomLeft)
     }
 
     #[test]
