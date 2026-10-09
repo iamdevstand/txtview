@@ -5,6 +5,7 @@ mod navigation;
 mod render;
 mod run;
 
+use std::borrow::Cow;
 use std::fmt;
 
 use crate::TxtViewConfig;
@@ -82,7 +83,10 @@ impl TxtView {
     /// Create a viewer for the given text.
     ///
     /// The text is split into lines. Blank lines are preserved and a single
-    /// trailing newline is ignored. Both borrowed and owned text are accepted:
+    /// trailing newline is ignored. Both borrowed and owned text are
+    /// accepted. The text is copied so the viewer owns its document and can
+    /// outlive the input. Owned text that no longer needs to be used can be
+    /// taken over without the copy via `TxtView::from`.
     ///
     /// ```
     /// use txtview::TxtView;
@@ -95,7 +99,10 @@ impl TxtView {
     /// assert_eq!(viewer.line_count(), 2);
     /// ```
     pub fn new(input: impl AsRef<str>) -> Self {
-        let text = input.as_ref().to_owned();
+        Self::from_text(input.as_ref().to_owned())
+    }
+
+    fn from_text(text: String) -> Self {
         let line_starts = index_lines(&text);
         let mut view = TxtView {
             text,
@@ -137,6 +144,29 @@ impl TxtView {
     /// The number of logical lines in the input.
     pub fn line_count(&self) -> usize {
         self.line_starts.len()
+    }
+
+    /// An iterator over the document's lines, matching `str::lines()`.
+    ///
+    /// Each line is a borrowed slice of the document without its line
+    /// terminator, so CRLF input iterates identically to how `str::lines()`
+    /// split it. Lines are served from the byte-offset index built at
+    /// construction: no re-scan of the buffer, no per-line allocation. It is
+    /// exact-size, since the line count is known at construction.
+    ///
+    /// ```
+    /// use txtview::TxtView;
+    ///
+    /// let viewer = TxtView::new("line one\nline two\r\nline three");
+    /// assert_eq!(
+    ///     viewer.lines().collect::<Vec<_>>(),
+    ///     ["line one", "line two", "line three"]
+    /// );
+    ///
+    /// assert!(TxtView::new("").lines().next().is_none());
+    /// ```
+    pub fn lines(&self) -> impl ExactSizeIterator<Item = &str> + '_ {
+        (0..self.line_starts.len()).map(move |i| self.line(i))
     }
 
     /// The `i`-th line as a borrowed slice of the single text buffer.
@@ -181,6 +211,59 @@ impl TxtView {
 
     fn query_size() -> (u16, u16) {
         terminal::size().unwrap_or((80, 24))
+    }
+}
+
+impl From<String> for TxtView {
+    /// A viewer that takes the given text over: the [`String`]'s buffer is
+    /// moved into the viewer without a copy.
+    ///
+    /// Borrowed text should go through [`TxtView::new`], which copies it so the
+    /// viewer can outlive the input.
+    ///
+    /// ```
+    /// use txtview::TxtView;
+    ///
+    /// let owned = String::from("line one\nline two");
+    /// let viewer = TxtView::from(owned);
+    /// assert_eq!(viewer.line_count(), 2);
+    /// ```
+    fn from(text: String) -> Self {
+        TxtView::from_text(text)
+    }
+}
+
+impl From<Cow<'_, str>> for TxtView {
+    /// A viewer that takes the given text over: an owned [`Cow::Owned`] buffer
+    /// is moved into the viewer without a copy, a borrowed [`Cow::Borrowed`]
+    /// slice is copied.
+    ///
+    /// ```
+    /// use std::borrow::Cow;
+    /// use txtview::TxtView;
+    ///
+    /// let viewer = TxtView::from(Cow::Owned(String::from("line one\nline two")));
+    /// assert_eq!(viewer.line_count(), 2);
+    ///
+    /// let viewer = TxtView::from(Cow::Borrowed("line one\nline two"));
+    /// assert_eq!(viewer.line_count(), 2);
+    /// ```
+    fn from(input: Cow<'_, str>) -> Self {
+        TxtView::from(String::from(input))
+    }
+}
+
+impl AsRef<str> for TxtView {
+    /// The document's text as a slice.
+    ///
+    /// ```
+    /// use txtview::TxtView;
+    ///
+    /// let viewer = TxtView::new("line one\nline two");
+    /// assert_eq!(viewer.as_ref(), "line one\nline two");
+    /// ```
+    fn as_ref(&self) -> &str {
+        &self.text
     }
 }
 

@@ -21,7 +21,7 @@ fn main() -> std::io::Result<()> {
     let bytes = fs::read(&path).map_err(|e| std::io::Error::other(format!("{}: {}", path, e)))?;
     let text = decode(&bytes).map_err(|e| std::io::Error::other(format!("{}: {}", path, e)))?;
 
-    let mut viewer = TxtView::new(text);
+    let mut viewer = TxtView::from(text);
     viewer.run()
 }
 

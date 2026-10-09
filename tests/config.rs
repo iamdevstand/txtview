@@ -90,3 +90,54 @@ fn config_debug_lists_the_configuration_fields() {
     assert!(out.contains("viewport_width"), "missing field: {out}");
     assert!(out.contains("viewport_height"), "missing field: {out}");
 }
+
+#[test]
+fn config_equality_compares_every_field() {
+    let base = TxtViewConfig::default();
+    assert_eq!(base, TxtViewConfig::default());
+    assert_ne!(
+        base,
+        TxtViewConfig {
+            show_line_numbers: true,
+            ..base.clone()
+        }
+    );
+    assert_ne!(
+        base,
+        TxtViewConfig {
+            show_help_bar: false,
+            ..base.clone()
+        }
+    );
+    assert_ne!(
+        base,
+        TxtViewConfig {
+            show_scrollbar: false,
+            ..base.clone()
+        }
+    );
+    assert_ne!(
+        base,
+        TxtViewConfig {
+            viewport_width: Some(40),
+            ..base.clone()
+        }
+    );
+    assert_ne!(
+        base,
+        TxtViewConfig {
+            viewport_height: Some(12),
+            ..base.clone()
+        }
+    );
+    let via_setters = base
+        .clone()
+        .with_show_line_numbers(true)
+        .with_viewport_width(Some(40));
+    let via_struct = TxtViewConfig {
+        show_line_numbers: true,
+        viewport_width: Some(40),
+        ..base.clone()
+    };
+    assert_eq!(via_setters, via_struct);
+}

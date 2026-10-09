@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `From` implementations for `TxtView`: `TxtView::from` takes a `String` and moves its buffer into the viewer without a copy (a `Cow::Owned` buffer likewise, a `Cow::Borrowed` slice is copied). `new` continues to copy the input and now shares the construction path with it.
+- `AsRef<str>` for `TxtView` (returns the document's text).
+- `TxtView::lines()`, an iterator over the document's lines matching `str::lines()`, served from the byte-offset index built at construction (no buffer re-scan, no per-line allocation).
+- `PartialEq` and `Eq` for `TxtViewConfig`: two configs compare equal when all fields match.
+- The `view_file` example hands the decoded text to `TxtView::from`, so the example no longer copies the decoded text during construction (no transient 2× peak).
+
 ### Changed
 
 - Style replay at a wrap boundary no longer allocates when nothing is styled: the SGR state answers `is_active` before anything is built and writes its codes straight into the new row instead of an intermediate parameter string, so wrapping a long line costs a small constant number of allocations per row instead of one extra allocation per boundary.

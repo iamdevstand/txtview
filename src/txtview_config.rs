@@ -24,7 +24,10 @@
 /// New options arrive in minor releases (`0.x.0`) and always default to the
 /// previous behavior, so an existing viewer only changes look when you opt
 /// in. Patches (`0.x.y`) ship only bug fixes and purely additive methods.
-#[derive(Debug, Clone)]
+///
+/// The config compares structurally: two configs are equal when all fields
+/// match.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TxtViewConfig {
     /// Show a line-number column on the left side of the viewport.
     /// Defaults to `false`.

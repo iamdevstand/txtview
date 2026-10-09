@@ -45,6 +45,17 @@ fn main() {
 }
 ```
 
+`TxtView::new` copies the text, so the viewer owns its document and can outlive the input. `viewer.as_ref()` returns the document back as a `&str` and `viewer.lines()` iterates the document line by line, matching `str::lines()`.
+
+When you already own the text as a `String` and do not need it afterwards, `TxtView::from` hands the buffer to the viewer without copying it:
+
+```rust
+let text = std::fs::read_to_string("big.log").unwrap();
+
+let mut viewer = TxtView::from(text);
+viewer.run().unwrap();
+```
+
 ## Styled Text
 
 TxtView renders ANSI-styled text correctly: SGR color and style codes, plus OSC8 hyperlinks, pass through untouched, and when a styled line wraps the active style is preserved and re-emitted as a compact prefix on the wrapped rows. Control bytes and any other escape sequence are shown as visible caret notation (`^G`, `^[[2A`) rather than executed. Build your styled strings with [crossterm](https://github.com/crossterm-rs/crossterm) (the same library TxtView uses internally, so adding it costs no extra build time):
@@ -89,6 +100,8 @@ let config = TxtViewConfig::default()
 ```
 
 It can toggle line numbers, the help bar, and the scrollbar, as well as fix the viewport width and height (it falls back to the terminal size when unset).
+
+Configs compare structurally: `TxtViewConfig` implements `PartialEq`/`Eq`, so two configs can be checked for equality.
 
 For the full list of options and defaults, see the `TxtViewConfig` rustdoc.
 
