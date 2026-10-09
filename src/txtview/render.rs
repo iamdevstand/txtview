@@ -21,7 +21,18 @@ impl TxtView {
     /// order they were added. The same canvas also answers mouse presses, so
     /// the scrollbar behaves like the piece it is instead of being bolted on.
     pub(super) fn draw(&mut self, stdout: &mut impl io::Write) -> io::Result<()> {
-        self.refresh_bounds();
+        self.draw_at(stdout, Self::query_size())
+    }
+
+    /// Draw a frame against a caller-reported terminal size, used by the
+    /// resize path so the size handed to the event is the one laid out
+    /// instead of a redundant terminal query. Everything else is [`draw`].
+    pub(super) fn draw_at(
+        &mut self,
+        stdout: &mut impl io::Write,
+        size: (u16, u16),
+    ) -> io::Result<()> {
+        self.refresh_bounds_at(size);
         self.compose().render(stdout)?;
         stdout.flush()?;
         Ok(())

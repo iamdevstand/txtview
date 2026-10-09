@@ -249,17 +249,24 @@ impl TxtView {
         format!("{:>width$} │ ", label, width = width)
     }
 
-    /// Reconcile the display model with the current configuration and
-    /// viewport size.
+    /// Reconcile the display model with the current configuration and the
+    /// terminal size, querying the terminal itself.
+    pub(super) fn refresh_bounds(&mut self) {
+        self.refresh_bounds_at(Self::query_size());
+    }
+
+    /// Reconcile the display model with the current configuration and a given
+    /// viewport size, so a resize event can hand its own reported size in
+    /// without a fresh terminal query.
     ///
     /// Rebuilds the row-count index when the geometry changed (resize or
     /// config flip) or the overflow state drifted, then recomputes
-    /// `max_offset` and clamps `offset`. All state except the terminal
-    /// query behind `term_size`, so it runs before composing a frame and can
-    /// be skipped between mouse events as long as nothing layout-affecting
-    /// changed since the last draw.
-    pub(super) fn refresh_bounds(&mut self) {
-        self.cell_size = Self::query_size();
+    /// `max_offset` and clamps `offset`. The viewport size is taken as
+    /// given, so no terminal query runs here. It runs before composing a
+    /// frame and can be skipped between mouse events as long as nothing
+    /// layout-affecting changed since the last draw.
+    pub(super) fn refresh_bounds_at(&mut self, size: (u16, u16)) {
+        self.cell_size = size;
         let overflows = self.config.show_scrollbar
             && ScrollGeometry::room_to_travel(self.display_len(), usize::from(self.visible_rows()));
         if overflows != self.scrollbar_active

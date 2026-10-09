@@ -58,7 +58,8 @@ pub struct TxtView {
     /// The geometry the `display` rows were wrapped for, `None` before the
     /// first layout.
     display_geometry: Option<LayoutGeometry>,
-    /// Cached terminal size, refreshed once per frame in `refresh_bounds`
+    /// Cached terminal size, refreshed once per frame in `refresh_bounds` or
+    /// handed straight in through `refresh_bounds_at` on a resize
     cell_size: (u16, u16),
 }
 

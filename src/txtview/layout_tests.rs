@@ -57,6 +57,24 @@ const LINE_NUMBERS: TxtViewConfig = TxtViewConfig {
 };
 
 #[test]
+fn refresh_bounds_at_adopts_the_reported_size() {
+    let mut v = viewer("abcdefghij\nkl", 10);
+    assert_eq!(v.display_len(), 2, "two lines fit the 10-column width");
+
+    v.refresh_bounds_at((4, 3));
+    assert_eq!(
+        v.cell_size,
+        (4, 3),
+        "the handed size must replace the queried one"
+    );
+    assert_eq!(
+        all_display_rows(&v),
+        vec!["abcd", "efgh", "ij", "kl"],
+        "the narrower width must rewrap the layout against the handed size"
+    );
+}
+
+#[test]
 fn tab_wrapped_line_renders_correctly() {
     let v = viewer("a\tb", 8);
     assert_eq!(all_display_rows(&v), vec!["a\t", "b"]);

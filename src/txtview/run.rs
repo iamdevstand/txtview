@@ -226,8 +226,8 @@ impl TxtView {
                     }
                     _ => {}
                 },
-                Event::Resize(_cols, _rows) => {
-                    self.draw(stdout)?;
+                Event::Resize(cols, rows) => {
+                    self.draw_at(stdout, (cols, rows))?;
                 }
                 _ => {}
             }
