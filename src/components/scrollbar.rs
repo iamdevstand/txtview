@@ -1,6 +1,6 @@
-use std::io;
+use std::io::{self, Write as _};
 
-use crossterm::{QueueableCommand, cursor::MoveTo};
+use crossterm::cursor::MoveTo;
 
 use crate::surface::{Anchor, Area, Component, Gesture, Request};
 
@@ -191,31 +191,35 @@ impl Component for ScrollBar {
         if area.is_empty() {
             return Ok(());
         }
+        // `geometry.visible` is bounded by a u16 viewport, so this cannot
+        // truncate. A fallback of the full area keeps every painted cell on
+        // the track
+        let cells = match self.orientation {
+            Orientation::Vertical => u16::try_from(self.geometry.visible)
+                .unwrap_or(area.height)
+                .min(area.height),
+            Orientation::Horizontal => u16::try_from(self.geometry.visible)
+                .unwrap_or(area.width)
+                .min(area.width),
+        };
+        let mut buf = Vec::with_capacity(usize::from(cells) * 12);
         match self.orientation {
             Orientation::Vertical => {
-                // `geometry.visible` is bounded by a u16 viewport, so this
-                // cannot truncate. A fallback of the full area keeps every
-                // painted cell on the track
-                let cells = u16::try_from(self.geometry.visible)
-                    .unwrap_or(area.height)
-                    .min(area.height);
                 for i in 0..cells {
                     let ch = self.cell(usize::from(i));
-                    QueueableCommand::queue(out, MoveTo(area.col, area.row + i))?;
-                    write!(out, "{}", ch)?;
+                    write!(buf, "{}", MoveTo(area.col, area.row + i))?;
+                    buf.extend_from_slice(ch.encode_utf8(&mut [0u8; 4]).as_bytes());
                 }
             }
             Orientation::Horizontal => {
-                let cells = u16::try_from(self.geometry.visible)
-                    .unwrap_or(area.width)
-                    .min(area.width);
                 for i in 0..cells {
                     let ch = self.cell(usize::from(i));
-                    QueueableCommand::queue(out, MoveTo(area.col + i, area.row))?;
-                    write!(out, "{}", ch)?;
+                    write!(buf, "{}", MoveTo(area.col + i, area.row))?;
+                    buf.extend_from_slice(ch.encode_utf8(&mut [0u8; 4]).as_bytes());
                 }
             }
         }
+        out.write_all(&buf)?;
         Ok(())
     }
 }
