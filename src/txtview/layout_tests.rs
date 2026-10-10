@@ -5,7 +5,8 @@ use crate::TxtViewConfig;
 
 use super::TxtView;
 use super::layout::decimals;
-use super::test_metrics::{materialized, rebuilds, reset, wraps};
+use super::test_metrics::{help_wraps, materialized, rebuilds, reset, wraps};
+use crate::surface::Gesture;
 
 #[test]
 fn decimals_matches_to_string_len() {
@@ -227,7 +228,8 @@ fn visible_rows_unchanged_when_help_fits() {
         ..TxtViewConfig::default()
     };
     let v = TxtView::new("hello\nworld").with_config(config);
-    let help = 1 + TxtView::help_text().chars().count().div_ceil(80).max(1);
+    let wrapped = crate::text::wrap_line_ansi_count(crate::components::helpbar::HELP_TEXT, 80, 0);
+    let help = 1 + wrapped;
     assert_eq!(usize::from(v.visible_rows()), 10 - help);
 }
 
@@ -596,5 +598,41 @@ fn draw_wraps_and_materializes_only_the_visible_window() {
     assert!(
         materialized() * 2 < v.display_len(),
         "the materialized rows must stay a fraction of the document"
+    );
+}
+
+#[test]
+fn the_help_bar_wraps_once_per_drawn_frame_and_not_for_a_press() {
+    reset();
+    let config = TxtViewConfig {
+        show_help_bar: true,
+        show_scrollbar: false,
+        viewport_width: Some(80),
+        viewport_height: Some(24),
+        ..TxtViewConfig::default()
+    };
+    let text = (0..200)
+        .map(|i| format!("line {i}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let mut v = TxtView::new(&text).with_config(config);
+
+    assert_eq!(
+        help_wraps(),
+        0,
+        "laying out the viewport must not build the help rows"
+    );
+
+    // The mouse paths compose only to route the press.They must never build
+    // the help rows, which a frame needs only when it paints the bar
+    let _ = v.compose().press(0, 0, v.max_offset, Gesture::Press);
+    assert_eq!(help_wraps(), 0, "routing a press built the help rows");
+
+    let mut out = Vec::new();
+    v.draw(&mut out).unwrap();
+    assert_eq!(
+        help_wraps(),
+        1,
+        "a drawn frame builds the help rows exactly once"
     );
 }

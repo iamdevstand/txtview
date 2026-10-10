@@ -4,7 +4,7 @@
 use super::TxtView;
 use crate::components::HelpBar;
 use crate::components::scrollbar::ScrollGeometry;
-use crate::text::{WrappedLine, wrap_line_ansi, wrap_line_ansi_count};
+use crate::text::{WrappedLine, wrap_line_ansi_count};
 
 /// The decimal digit count of `n`, allocation-free. `decimals(0)` is `1`,
 /// so a zero value still counts a digit.
@@ -52,29 +52,15 @@ impl TxtView {
         }
     }
 
-    pub(super) fn help_text() -> String {
-        "q: quit | ↑/↓, j/k, Mouse: scroll | PgUp/PgDn: page | Home/End, g/G: start/end".to_string()
-    }
-
-    /// The wrapped rows of the help text, produced the same way the content
-    /// rows are: one `wrap_line_ansi` over the viewport width, so the help
-    /// bar and the content share a single wrapping routine and geometry. The
-    /// bar spans the full viewport width (its row runs under the scrollbar's
-    /// column too), so it wraps at `content_cols`, not at the content's
-    /// narrower `avail`.
-    pub(super) fn help_rows(&self) -> Vec<String> {
-        wrap_line_ansi(
-            &Self::help_text(),
-            usize::from(self.content_cols()).max(1),
-            0,
-        )
-    }
-
+    /// The height the help bar takes when pinned to the bottom of the
+    /// viewport or zero when it hides itself. The bar measures its wrapped
+    /// rows with the allocation-free count, so a frame can ask for this as
+    /// often as it likes without building them.
     fn help_height(&self) -> u16 {
         if !self.config.show_help_bar {
             return 0;
         }
-        HelpBar::new(self.help_rows()).height(self.resolved_height())
+        HelpBar::help(self.content_cols()).height(self.resolved_height())
     }
 
     /// The columns the viewport spans: the resolved width, before the
@@ -267,15 +253,18 @@ impl TxtView {
     /// layout-affecting changed since the last draw.
     pub(super) fn refresh_bounds_at(&mut self, size: (u16, u16)) {
         self.cell_size = size;
+        // The visible row count depends only on the viewport size and the
+        // configuration, not on the row index, so measure it once and reuse it
+        // for the overflow check and the scroll bounds
+        let visible = self.visible_rows();
         let overflows = self.config.show_scrollbar
-            && ScrollGeometry::room_to_travel(self.display_len(), usize::from(self.visible_rows()));
+            && ScrollGeometry::room_to_travel(self.display_len(), usize::from(visible));
         if overflows != self.scrollbar_active
             || self.display_geometry != Some(self.layout_geometry())
         {
             self.rebuild_display();
         }
-        let vr = usize::from(self.visible_rows());
-        self.max_offset = self.display_len().saturating_sub(vr);
+        self.max_offset = self.display_len().saturating_sub(usize::from(visible));
         self.clamp_offset();
     }
 

@@ -339,7 +339,7 @@ mod tests {
 }
 
 #[cfg(test)]
-mod test_metrics {
+pub(crate) mod test_metrics {
     //! Counting of display rebuilds and wrap passes. Test-only, so the
     //! production struct carries no instrumentation. Each test gets its own
     //! thread, so a thread-local counter is per-test: exact equality
@@ -351,12 +351,14 @@ mod test_metrics {
         static REBUILDS: Cell<usize> = const { Cell::new(0) };
         static WRAPS: Cell<usize> = const { Cell::new(0) };
         static MATERIALIZED: Cell<usize> = const { Cell::new(0) };
+        static HELP_WRAPS: Cell<usize> = const { Cell::new(0) };
     }
 
     pub(crate) fn reset() {
         REBUILDS.with(|c| c.set(0));
         WRAPS.with(|c| c.set(0));
         MATERIALIZED.with(|c| c.set(0));
+        HELP_WRAPS.with(|c| c.set(0));
     }
 
     pub(crate) fn bump_rebuild() {
@@ -371,6 +373,10 @@ mod test_metrics {
         MATERIALIZED.with(|c| c.set(c.get() + 1));
     }
 
+    pub(crate) fn bump_help_wrap() {
+        HELP_WRAPS.with(|c| c.set(c.get() + 1));
+    }
+
     pub(crate) fn rebuilds() -> usize {
         REBUILDS.with(Cell::get)
     }
@@ -381,5 +387,9 @@ mod test_metrics {
 
     pub(crate) fn materialized() -> usize {
         MATERIALIZED.with(Cell::get)
+    }
+
+    pub(crate) fn help_wraps() -> usize {
+        HELP_WRAPS.with(Cell::get)
     }
 }

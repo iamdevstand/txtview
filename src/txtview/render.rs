@@ -68,7 +68,7 @@ impl TxtView {
 
         let mut canvas = Canvas::new(cols, viewport_rows);
         if self.config.show_help_bar {
-            canvas.place(HelpBar::new(self.help_rows()));
+            canvas.place(HelpBar::help(cols));
         }
         if let Some(geometry) = self.scroll_geometry() {
             canvas.place(ScrollBar::new(
