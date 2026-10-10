@@ -117,8 +117,66 @@ pub(super) fn escape_display(seq: &str) -> String {
     out
 }
 
+/// The terminal columns [`escape_display`] occupies, computed without building
+/// the display string. `ESC` and every control byte render as a two-character
+/// caret pair, everything else keeps its own width. The two helpers share the
+/// same predicates, so they agree for any input.
+/// `escape_display_width_matches_display` pins that across a corpus.
+pub(super) fn escape_display_width(seq: &str) -> usize {
+    let mut width = 0;
+    for c in seq.chars() {
+        width += if c == '\u{1b}' || caret_width(c) {
+            2
+        } else {
+            c.width().unwrap_or(1)
+        };
+    }
+    width
+}
+
 /// The terminal columns of a run of already-neutralized display text: each
 /// character takes its Unicode width, with a guaranteed minimum of one.
 pub(super) fn display_width(text: &str) -> usize {
     text.chars().map(|c| c.width().unwrap_or(1)).sum()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn escape_display_width_matches_display() {
+        // Every C0/C1 control and DEL, both bare and inside an escape prefix
+        for c in 0u32..=0x9f {
+            let ch = char::from_u32(c).unwrap();
+            for text in [ch.to_string(), format!("\x1b{ch}"), format!("\x1b[{ch}")] {
+                assert_eq!(
+                    escape_display_width(&text),
+                    display_width(&escape_display(&text)),
+                    "width of {text:?}"
+                );
+            }
+        }
+        let corpus = [
+            "\x1b[",
+            "\x1b[2A",
+            "\x1b[2J",
+            "\x1b]0;hi\x07",
+            "\x1b]0;hi\x1b\\",
+            "\x1b7",
+            "\x1bX",
+            "\x1b",
+            "\x1b[中",
+            "\x1b[31中x",
+            "a\x07\x7f中",
+            "\x1b]0;中❤\u{fe0f}\x07",
+        ];
+        for seq in corpus {
+            assert_eq!(
+                escape_display_width(seq),
+                display_width(&escape_display(seq)),
+                "width of {seq:?}"
+            );
+        }
+    }
 }

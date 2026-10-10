@@ -5,7 +5,9 @@ use std::borrow::Cow;
 
 use unicode_segmentation::UnicodeSegmentation;
 
-use super::ansi::{Esc, caret_notation, display_width, escape_display, parse_escape};
+use super::ansi::{
+    Esc, caret_notation, display_width, escape_display, escape_display_width, parse_escape,
+};
 use super::sgr::SgrState;
 
 /// Columns between tab stops.
@@ -34,11 +36,19 @@ pub(super) fn cluster_width_at(cluster: &str, col: usize) -> usize {
 /// occupies, whether it is a tab, the byte offset of the next piece and the
 /// SGR sequence itself when the piece is one, so callers that track
 /// replayable style can fold it into their live state.
+///
+/// When `materialize` is false, only SGR and OSC8 sequences are returned raw
+/// (both zero-width, so a counting scan never consumes them for output). The
+/// visible caret-notation and escape-display text is not built. The counting
+/// scan only needs each piece's width and boundary, so skipping those
+/// allocations is free of behavior: the width is always computed the same way,
+/// so the two modes can never disagree about a wrap.
 fn measure_piece<'a>(
     line: &'a str,
     bytes: &'a [u8],
     i: usize,
     col: usize,
+    materialize: bool,
 ) -> (Cow<'a, str>, usize, bool, usize, Option<&'a str>) {
     if bytes[i] == 0x1b {
         let (end, kind) = parse_escape(bytes, i);
@@ -57,9 +67,13 @@ fn measure_piece<'a>(
                 // 2-byte) is shown as visible caret notation, like `less`.
                 // It is emitted as one atomic unit: never executed, never
                 // split across a wrap boundary
-                let display = escape_display(seq);
-                let width = display_width(&display);
-                (Cow::Owned(display), width, false, end, None)
+                let width = escape_display_width(seq);
+                let display = if materialize {
+                    Cow::Owned(escape_display(seq))
+                } else {
+                    Cow::Borrowed("")
+                };
+                (display, width, false, end, None)
             }
         }
     } else {
@@ -75,10 +89,14 @@ fn measure_piece<'a>(
         // - tab keeps its literal byte in the display row (wrapped at
         //   its 8-column stop, the write layer expands it to spaces),
         // - C0/C1 controls and DEL become visible caret notation.
-        let replacement: Cow<'_, str> = match c {
-            '\t' => Cow::Borrowed(cluster),
-            c if c.is_control() => Cow::Owned(caret_notation(c)),
-            _ => Cow::Borrowed(cluster),
+        let replacement: Cow<'_, str> = if !materialize {
+            Cow::Borrowed("")
+        } else {
+            match c {
+                '\t' => Cow::Borrowed(cluster),
+                c if c.is_control() => Cow::Owned(caret_notation(c)),
+                _ => Cow::Borrowed(cluster),
+            }
         };
         let ch_width = cluster_width_at(cluster, col);
         (replacement, ch_width, is_tab, end, None)
@@ -110,12 +128,33 @@ pub(crate) struct WrappedLine<'a> {
     /// fresh row it started. A wrapped tab's width is already re-measured
     /// from the fresh row's first column.
     pending: Option<(Cow<'a, str>, usize, bool)>,
+    /// Whether each piece's display text is built. A counting scan only needs
+    /// widths and boundaries, so it leaves this false and allocates nothing
+    /// for control bytes or escapes. A building scan sets it true.
+    materialize: bool,
     /// Every piece is consumed and the last row emitted.
     exhausted: bool,
 }
 
 impl<'a> WrappedLine<'a> {
     pub(crate) fn new(line: &'a str, width: usize, start_col: usize) -> Self {
+        WrappedLine::with_materialization(line, width, start_col, true)
+    }
+
+    /// A width-only scan for [`wrap_line_ansi_count`]: it walks the same
+    /// boundaries as a building scan, but never materializes a piece's display
+    /// text, so counting a whole document allocates nothing for the control
+    /// bytes and escapes it sees.
+    fn counting(line: &'a str, width: usize, start_col: usize) -> Self {
+        WrappedLine::with_materialization(line, width, start_col, false)
+    }
+
+    fn with_materialization(
+        line: &'a str,
+        width: usize,
+        start_col: usize,
+        materialize: bool,
+    ) -> Self {
         WrappedLine {
             line,
             bytes: line.as_bytes(),
@@ -124,6 +163,7 @@ impl<'a> WrappedLine<'a> {
             i: 0,
             style: SgrState::default(),
             pending: None,
+            materialize,
             exhausted: false,
         }
     }
@@ -213,6 +253,7 @@ impl<'a> WrappedLine<'a> {
                         self.bytes,
                         self.i,
                         self.start_col + visible_width,
+                        self.materialize,
                     );
                     self.i = next;
                     if let Some(seq) = sgr {
@@ -308,7 +349,9 @@ pub(crate) fn wrap_line_ansi(line: &str, width: usize, start_col: usize) -> Vec<
 pub(crate) fn wrap_line_ansi_count(line: &str, width: usize, start_col: usize) -> usize {
     // An empty line still produces one blank display row, mirroring the
     // builder's `[String::new()]` fallback
-    WrappedLine::new(line, width, start_col).count_rows().max(1)
+    WrappedLine::counting(line, width, start_col)
+        .count_rows()
+        .max(1)
 }
 
 /// Visual width of a grapheme cluster. Emoji-presentation sequences carry the
