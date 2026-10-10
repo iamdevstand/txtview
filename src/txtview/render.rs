@@ -4,6 +4,11 @@
 
 use std::io;
 
+use crossterm::{
+    QueueableCommand,
+    terminal::{BeginSynchronizedUpdate, EndSynchronizedUpdate},
+};
+
 use super::TxtView;
 use crate::components::{Content, HelpBar, Orientation, ScrollBar};
 use crate::surface::Canvas;
@@ -33,7 +38,13 @@ impl TxtView {
         size: (u16, u16),
     ) -> io::Result<()> {
         self.refresh_bounds_at(size);
+        // Suspend presentation while the whole viewport repaints, so a fast
+        // scroll never shows a half-written frame: the terminal draws the
+        // completed frame atomically when the update ends. Terminals without
+        // mode 2026 ignore the private mode and render as usual
+        stdout.queue(BeginSynchronizedUpdate)?;
         self.compose().render(stdout)?;
+        stdout.queue(EndSynchronizedUpdate)?;
         stdout.flush()?;
         Ok(())
     }
@@ -348,7 +359,7 @@ mod tests {
         v.draw(&mut frame).unwrap();
         let first = String::from_utf8_lossy(&frame);
         assert_eq!(
-            first, "\x1b[1;1H01234567\x1b[2;1Hab      ",
+            first, "\x1b[?2026h\x1b[1;1H01234567\x1b[2;1Hab      \x1b[?2026l",
             "frame 1 must paint the tab gap as spaces: {first:?}"
         );
 
@@ -357,7 +368,7 @@ mod tests {
         v.draw(&mut frame).unwrap();
         let second = String::from_utf8_lossy(&frame);
         assert_eq!(
-            second, "\x1b[1;1Hab      \x1b[2;1Hcd      ",
+            second, "\x1b[?2026h\x1b[1;1Hab      \x1b[2;1Hcd      \x1b[?2026l",
             "frame 2 must repaint the gap a literal tab byte would have skipped: {second:?}"
         );
     }
@@ -377,7 +388,7 @@ mod tests {
         v.draw(&mut out).unwrap();
         let s = String::from_utf8_lossy(&out);
         assert_eq!(
-            s, "\x1b[1;1H1 │ ab  cd\x1b[2;1H2 │ ef    ",
+            s, "\x1b[?2026h\x1b[1;1H1 │ ab  cd\x1b[2;1H2 │ ef    \x1b[?2026l",
             "the tab must reach the same stop the wrap measured under the prefix: {s:?}"
         );
     }
@@ -397,7 +408,7 @@ mod tests {
         v.draw(&mut out).unwrap();
         let s = String::from_utf8_lossy(&out);
         assert_eq!(
-            s, "\x1b[1;1Ha\x1b[2;1Hb\x1b[3;1Hc",
+            s, "\x1b[?2026h\x1b[1;1Ha\x1b[2;1Hb\x1b[3;1Hc\x1b[?2026l",
             "a one-column viewport must paint content, not hand it a zero-width box: {s:?}"
         );
     }
