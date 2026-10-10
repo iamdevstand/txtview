@@ -17,10 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Every frame is drawn inside synchronized output (DEC 2026), so fast scrolling presents completed frames instead of half-painted ones. Fixes fast-scroll artifacts and scroll flicker.
+- The wrap-count pass measures control bytes and escapes without building their display text, so counting a document's rows allocates nothing for them.
 - A terminal `Resize` event lays out against its own reported size instead of re-querying it from the terminal.
 - Style replay at a wrap boundary no longer allocates when nothing is styled: the SGR state answers `is_active` before anything is built and writes its codes straight into the new row instead of an intermediate parameter string, so wrapping a long line costs a small constant number of allocations per row instead of one extra allocation per boundary.
 - The wrapped document is no longer materialized up front. A per-source-line row-count index (`row_layout`) replaces the full `Vec<String>` display and each visible row is wrapped on demand through an index lookup while a frame draws, so construction cost and memory track the document while per-frame wrap work tracks the visible window. Scrolling and mouse hit-testing wrap nothing at all.
 - The content piece renders straight from a row provider that materializes one display row at a time, so a frame allocates a single row string instead of a windowful of pre-wrapped rows.
+- The content piece folds each row's cursor move, text and padding into one reused byte buffer and commits them with a single write, so a frame costs one write per row instead of one `core::fmt` call per grapheme cluster.
 - Wrapping is driven by one resumable row-at-a-time scan (`WrappedLine`): the row-count index counts through it instead of a separate counter loop and a painted row skips every row before it without building them and materializes only the target one, so the painted row is wrapped once instead of re-wrapping the whole line, paying only to measure the rows it skips.
 - Every control character in wrapped rows measures as exactly two columns, so the wrapping width can no longer be misread as leaving one column for some controls.
 - `run()` reports a terminal restore that fails on the normal return path, where the `Drop` guard once dropped the teardown errors silently (the guard still cleans up on a panic, where reporting is impossible).
