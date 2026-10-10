@@ -1,6 +1,6 @@
-use std::io;
+use std::io::{self, Write as _};
 
-use crossterm::{QueueableCommand, cursor::MoveTo};
+use crossterm::cursor::MoveTo;
 
 use crate::surface::{Area, Component};
 use crate::text::write_visible_row;
@@ -46,20 +46,27 @@ where
         if area.is_empty() {
             return Ok(());
         }
+        // Reused across the whole viewport: every row is folded into one buffer
+        // and committed with a single write, so a frame costs one write per row
+        // instead of one `core::fmt` call per grapheme cluster. The headroom
+        // covers the per-row `MoveTo` escape so the common row fits without
+        // growing the buffer; wide clusters and passthrough styling can still
+        // grow it.
+        let mut buf = Vec::with_capacity(usize::from(area.width) + 16);
         for i in 0..area.height {
             let text = (self.row)(self.offset + usize::from(i));
             let text = text.as_deref().unwrap_or("");
             let (col, row) = (area.col, area.row + i);
-            QueueableCommand::queue(out, MoveTo(col, row))?;
+            buf.clear();
+            write!(buf, "{}", MoveTo(col, row))?;
             // Write the leading text that fits the area, skipping a trailing
             // cluster wider than the area rather than splitting it, then pad
             // the remainder with spaces so stale cells fade without ever
             // writing past the cells the content owns
-            let used = write_visible_row(text, usize::from(area.width), out)?;
+            let used = write_visible_row(text, usize::from(area.width), &mut buf);
             let pad = usize::from(area.width).saturating_sub(used);
-            if pad > 0 {
-                write!(out, "{}", " ".repeat(pad))?;
-            }
+            buf.resize(buf.len() + pad, b' ');
+            out.write_all(&buf)?;
         }
         Ok(())
     }
